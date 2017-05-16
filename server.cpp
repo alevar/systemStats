@@ -24,19 +24,27 @@
 #include <pwd.h>
 #include <tuple>
 
-#include <time.h>
 #include <bitset>
 
-#define DESTINATION_ADDRESS "127.0.0.1"
-#define PORT    8886
-#define MAXDATASIZE 3000000 // max number of bytes
-
-int pageSize = getpagesize();
-
-// include timestamp for when the recording was made
-// include all three load averages
-// include top n users by cpu and by memory
-// see if possible to not swap the process without root permission
+typedef struct DiskSpace {
+    unsigned long asb; //available space in bytes
+    unsigned long fsb; //free space in bytes
+    unsigned long asp; //available space in percent
+    unsigned long fsp; //free space in percent
+} disksp;
+// #pragma pack(0)
+// #pragma pack(1)
+typedef struct RAM {
+    unsigned long mtb; //total memory in bytes
+    unsigned long mab; //memory available in bytes
+} memory;
+// #pragma pack(0)
+// #pragma pack(1)
+typedef struct OTHER {
+    unsigned long stb; //total swap in bytes
+    unsigned long sab; //available swap in bytes
+    long upt; //uptime in seconds
+} other;
 
 // #pragma pack(0)
 // #pragma pack(1)
@@ -260,7 +268,6 @@ typedef struct procSTAT {
     double exit_code; /*%d  (since Linux 3.5)  [PT] The thread's exit status in the form reported by
                         waitpid(2).*/
 } procinfo;
-// #pragma pack(0)
 
 typedef struct Stats {
     unsigned long asb; //available space in bytes
@@ -273,288 +280,57 @@ typedef struct Stats {
 
     unsigned long stb; //total swap in bytes
     unsigned long sab; //available swap in bytes
+
     long upt; //uptime in seconds
 
-    long loadavg; //rounded. needs to be devided by 10
+    long loadavg;
 } stats;
 
-void getDiskSpace(const char *path,Stats* stats){
-    struct statvfs buf;
-    struct stat fi;
+#define PORT    1234        // Port used by the server service
+#define BACKLOG 1           // Number of connections to queue
+#define BUFFERLENGTH 3000000    // 300 bytes
 
-    int ret = statvfs("/",&buf);
-    unsigned long freeBlocks = buf.f_bfree;
-    stat("/",&fi);
-    // unsigned long availableSpaceB = buf.f_bavail*buf.f_bsize;
-    // unsigned long freeSpaceB = buf.f_bfree*buf.f_bsize;
-    // unsigned long availableSpacePercent = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
-    // unsigned long freeSpacePercent = 100.0 * (double)buf.f_bfree / (double)buf.f_blocks;
-    stats->asb = buf.f_bavail*buf.f_bsize;
-    stats->fsb = buf.f_bfree*buf.f_bsize;
-    stats->asp = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
-    stats->fsp = 100.0 * (double)buf.f_bfree / (double)buf.f_blocks;
-}
-
-void getCPU(Stats* stats){
-    long double a[4], b[4];
-    FILE *fp;
-    char dump[50];
-
-    fp = fopen("/proc/stat","r");
-    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
-    fclose(fp);
-    sleep(1);
-
-    fp = fopen("/proc/stat","r");
-    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&b[0],&b[1],&b[2],&b[3]);
-    fclose(fp);
-
-    // loadavg = ((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]));
-    // printf("The current CPU utilization is : %Lf\n",loadavg);
-
-    stats->loadavg = (long)(((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))*10);
-}
-
-void getOther(Stats* stats){
-    struct sysinfo info;
-    sysinfo(&info);
-    // return{info.totalswap,info.freeswap,info.uptime};
-    stats->stb = info.totalswap;
-    stats->sab = info.freeswap;
-    stats->upt = info.uptime;
-}
-
-void getRAM(Stats* stats){
-    FILE* fp = fopen( "/proc/meminfo", "r" );
-    if ( fp != NULL )
-    {
-        size_t bufsize = 1024 * sizeof(char);
-        char* buf = (char*)malloc( bufsize );
-        long totalMem = -1L;
-        long freeMem = -1L;
-        long bufMem = -1L;
-        long cacheMem = -1L;
-        while ( getline( &buf, &bufsize, fp ) >= 0 )
-        {
-            if ( strncmp( buf, "MemTotal", 8 ) == 0 ){
-                sscanf( buf, "%*s%ld", &totalMem );
-            }
-            if ( strncmp( buf, "MemFree", 7 ) == 0 ){
-                sscanf( buf, "%*s%ld", &freeMem );
-            }
-            if ( strncmp( buf, "Buffers", 7 ) == 0 ){
-                sscanf( buf, "%*s%ld", &bufMem );
-            }
-            if ( strncmp( buf, "Cached", 6 ) == 0 ){
-                sscanf( buf, "%*s%ld", &cacheMem );
-            }
-
-        }
-        fclose(fp);
-        // return{(size_t)totalMem,(size_t)(freeMem+cacheMem+bufMem)};
-        stats->mtb = (size_t)totalMem;
-        stats->mab = (size_t)(freeMem+cacheMem+bufMem);
-    }
-}
-
-/*
-This function will likely iterate over the /proc/<procID>/stat and /proc/<procID>statm data
-Sort the data by highest CPU and RAM consumption
-and return top n processes
-
-Perhaps it will only be called if the system load is above a certain threshhold
-*/
-
-bool comp(const std::tuple<long,int,std::string>& a, const std::tuple<long,int,std::string>& b){
-    return std::get<1>(a) > std::get<1>(b);
-}
-
-void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
-    DIR* proc = opendir("/proc");
-    struct dirent* ent;
-    long tgid;
-
-    long double a[4];
-    FILE *fp;
-    char path[40];
-
-    while(ent = readdir(proc)) {
-        if(!isdigit(*ent->d_name))
-            continue;
-
-        tgid = strtol(ent->d_name, NULL, 10);
-
-        snprintf(path, 40, "/proc/%ld/statm", tgid);
-        fp = fopen(path,"r");
-        fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
-        fclose(fp);
-        procs->push_back(std::make_tuple(tgid,a[0],"sparrow"));
-    }
-    closedir(proc);
-
-    sort(procs->begin(),procs->end(),comp);
-    procs->resize(10);
-}
-
-void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string>> *procs,long uptime){
-    DIR* proc = opendir("/proc");
-    int hertz = sysconf(_SC_CLK_TCK);
-    struct dirent* ent;
-    long tgid;
-
-    long double a[33];
-    FILE *fp;
-    char path[40];
-
-    while(ent = readdir(proc)) {
-        if(!isdigit(*ent->d_name))
-            continue;
-
-        tgid = strtol(ent->d_name, NULL, 10);
-        snprintf(path, 40, "/proc/%ld/stat", tgid);
-        fp = fopen(path,"r");
-        fscanf(fp,"%i %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
-                  /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
-        &(pinfo->pid),                     //1
-        &(pinfo->comm),                    //2
-        &(pinfo->state),                   //3
-        &(pinfo->ppid),                    //4
-        &(pinfo->pgrp),                    //5
-        &(pinfo->session),                 //6
-        &(pinfo->tty_nr),                  //7
-        &(pinfo->tpgid),                   //8
-        &(pinfo->flags),                   //9
-        &(pinfo->minflt),                  //10
-        &(pinfo->cminflt),                 //11
-        &(pinfo->majflt),                  //12
-        &(pinfo->cmajflt),                 //13
-        &(pinfo->utime),                   //14
-        &(pinfo->stime),                   //15
-        &(pinfo->cutime),                  //16
-        &(pinfo->cstime),                  //17
-        &(pinfo->priority),                //18
-        &(pinfo->nice),                    //19
-        &(pinfo->num_threads),             //20
-        &(pinfo->itrealvalue),             //21
-        &(pinfo->starttime),               //22
-        &(pinfo->vsize),                   //23
-        &(pinfo->rss),                     //24
-        &(pinfo->rsslim),                  //25
-        &(pinfo->startcode),               //26
-        &(pinfo->endcode),                 //27
-        &(pinfo->startstack),              //28
-        &(pinfo->kstkesp),                 //29
-        &(pinfo->kstkeip),                 //30
-        &(pinfo->signal),                  //31
-        &(pinfo->blocked),                 //32
-        &(pinfo->sigignore),               //33
-        &(pinfo->sigcatch),                //34
-        &(pinfo->wchan),                   //35
-        &(pinfo->nswap),                   //36
-        &(pinfo->cnswap),                  //37
-        &(pinfo->exit_signal),             //38
-        &(pinfo->processor),               //39
-        &(pinfo->rt_priority),             //40
-        &(pinfo->policy),                  //41
-        &(pinfo->delayacct_blkio_ticks),   //42
-        &(pinfo->guest_time),              //43
-        &(pinfo->cguest_time),             //44
-        &(pinfo->start_data),              //45
-        &(pinfo->end_data),                //46
-        &(pinfo->start_brk),               //47
-        &(pinfo->arg_start),               //48
-        &(pinfo->arg_end),                 //49
-        &(pinfo->env_start),               //50
-        &(pinfo->env_end),                 //51
-        &(pinfo->exit_code)                //52
-        );
-        fclose(fp);
-        unsigned long totalTime = pinfo->utime+pinfo->stime;
-        float seconds = (float)uptime-((float)pinfo->starttime/(float)hertz);
-        float cpu_usage = 100*(((float)totalTime/(float)hertz)/seconds);
-        procs->push_back(std::make_tuple(tgid,cpu_usage,"sparrow"));
-    }
-    closedir(proc);
-    sort(procs->begin(),procs->end(),comp);
-    procs->resize(10);
-}
-
-void buildStats(Stats* stats){
-    getDiskSpace("/",stats);
-    getCPU(stats);
-    getRAM(stats);
-    getOther(stats);
-    // printf("Available Space Percent: %ld%%\n",paramsDisk.asp);
-    // printf("Free CPU load average: %lf%%\n",loadavg);
-    // printf("Free Memory Percent: %lf%%\n",(float)paramsRAM.mab/(float)paramsRAM.mtb);
-    // printf("Free Swap Percent: %lf%%\n",(float)paramsOther.sab/(float)paramsOther.stb);
-    // printf("Uptime: %lds\n",paramsOther.upt);
-
-    std::vector<std::tuple <long,int,std::string>> procMem;
-    parseStatm(&procMem);
-    // for(int i=0;i<procMem.size();i++){
-    //     std::cout<<"PID: "<<std::get<0>(procMem[i])<<"  MEM: "<<(std::get<1>(procMem[i])*pageSize)/1024/1024<<"MB"<<std::endl;
-    // }
-    // std::cout<<"============================="<<std::endl;
-    procinfo pinfo;
-    std::vector<std::tuple <long,float,std::string>> procCPU;
-    parseStat(&pinfo,&procCPU,stats->upt);
-    // for(int i=0;i<procCPU.size();i++){
-    //     std::cout<<"PID: "<<std::get<0>(procCPU[i])<<"  CPU: "<<std::get<1>(procCPU[i])<<"\%"<<std::endl;
-    // }
-}
-
-void serialize(Stats* msgPacket, char *data){
+void deserialize(char *data, Stats* msgPacket)
+{
     unsigned long *q = (unsigned long*)data;    
-    *q = msgPacket->asb;       q++;    
-    *q = msgPacket->fsb;       q++;    
-    *q = msgPacket->asp;       q++;
-    *q = msgPacket->fsp;       q++;
+    msgPacket->asb = *q;     q++;    
+    msgPacket->asp = *q;     q++;    
+    msgPacket->fsb = *q;     q++;
+    msgPacket->fsp = *q;     q++;
 
-    *q = msgPacket->mtb;       q++;
-    *q = msgPacket->mab;       q++;
+    msgPacket->mtb = *q;     q++;
+    msgPacket->mab = *q;     q++;
 
-    *q = msgPacket->stb;       q++;
-    *q = msgPacket->sab;       q++;
+    msgPacket->stb = *q;     q++;
+    msgPacket->sab = *q;     q++;
 
     long *w = (long*)q;
-    *w = msgPacket->upt;
-    *w = msgPacket->loadavg;
+    msgPacket->upt = *w;     w++;
+    msgPacket->loadavg = *w; w++;
 }
 
-int main(int argc , char *argv[]){
-
+int main(int argc , char *argv[])
+{
     int c;
+
     int serverPort;
-    int destinationPort;
-    char * destinationAddress;
 
     while (1) {
         int this_option_optind = optind ? optind : 1;
         int option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
-            {"addr",     required_argument, 0,  0 },
             {0,         0,                 0,  0 }
         };
 
         c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
-        if (c == -1) {
+        if (c == -1){
             break;
         }
 
         switch (c) {
             case 0:
-                if (optarg){
-                    if (long_options[option_index].name == "port"){
-                        destinationPort = atoi(optarg);
-                        printf("PORT SET TO: %s\n", optarg );
-                    }
-                    if (long_options[option_index].name == "addr"){
-                        destinationAddress = optarg;
-                        printf("ADDR SET TO: %s\n", destinationAddress);
-                    }
-                }
+                serverPort = atoi(optarg);
                 break;
 
             case '?':
@@ -572,84 +348,104 @@ int main(int argc , char *argv[]){
         printf("\n");
     }
 
-    int socket_desc;
-    struct sockaddr_in server;
-    bool connectionStatus = true;
-    int numbytes;
-    char buf[MAXDATASIZE];
+    char parrentBuffer[BUFFERLENGTH];
+    int parentSocket, childSocket, addrlen;
+    struct sockaddr_in server, client;
 
-    // if((numbytes = recv(socket_desc, buf, MAXDATASIZE-1, 0)) == -1){
-    //     perror("recv()");
-    //     exit(1);
-    // }
-    // else{
-    //     buf[numbytes] = '\0';
-    // }
-
-    std::string putData = "hello server!";
-    bool waitRecv;
-    std::string incomingData;
-    bool log = true;
-
-    int count = 1;
-    double time_counter = 0;
-    clock_t this_time = clock();
-    clock_t last_time = this_time;
-
-    Stats stats;
-
-    while(log){
-        this_time = clock();
-
-        time_counter += (double)(this_time - last_time);
-
-        last_time = this_time;
-
-        if(time_counter > (double)(1 * CLOCKS_PER_SEC))
-        {
-            time_counter -= (double)(1 * CLOCKS_PER_SEC);
-            
-            buildStats(&stats);
-
-            socket_desc = socket(AF_INET , SOCK_STREAM , 0);
-            if (socket_desc == -1){
-                std::cout << "COULD NOT CREATE SOCKET" << std::endl;
-            }
-                 
-            server.sin_addr.s_addr = inet_addr(destinationAddress);
-            server.sin_family = AF_INET;
-            server.sin_port = htons( destinationPort );
-
-            std::cout<<sizeof(Stats)<<std::endl;
-            printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%li\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,stats.loadavg);
-
-            if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
-                std::cout << "CONNECT ERROR" << std::endl;
-                return 1;
-            }
-
-            char data1[sizeof(Stats)];
-            serialize(&stats, data1);
-            send(socket_desc,data1,sizeof(data1),MSG_CONFIRM);
-
-            waitRecv= true;
-            while(waitRecv){
-                if((numbytes = recv(socket_desc, buf, MAXDATASIZE-1, 0)) == -1){
-                    perror("recv()");
-                    exit(1);
-                }
-                else{
-                    buf[numbytes] = '\0';
-                    incomingData = buf;
-                    waitRecv = false;
-                    std::cout << incomingData << std::endl;
-                    close(socket_desc);
-                }
-            }
-
-            count++;
-        }
+    if((parentSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0)
+    {
+        printf("Could not create socket");
+        close(parentSocket);
+        exit(-1);
     }
 
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr("0.0.0.0"); // Autofill with my ip (lcalhost)
+    server.sin_port = htons( serverPort );
+
+    memset(&(server.sin_zero), 0, 8); // Set zero values to the rest of the server structure
+     
+    //Bind
+    if( bind(parentSocket,(struct sockaddr *)&server , sizeof(server)) < 0)
+    {
+        puts("bind failed");
+        close(parentSocket);
+        exit(-1);
+    }
+    puts("binding successful");
+     
+    listen(parentSocket , BACKLOG);
+    puts("Waiting for incoming connections...");
+    addrlen = sizeof(struct sockaddr_in);
+
+    while(true){
+        if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
+            close(childSocket);
+            exit(-1);
+        }
+
+        else{
+            switch(pid_t new_fork = fork())
+            {
+                case -1: // Error
+                    {
+                        perror("forking failed");
+                        close(parentSocket);
+                        close(childSocket);
+                        exit(-1);
+                    }
+                case 0: // Child
+                    {
+                        bool connectionStatus = true;
+
+                        while (connectionStatus){
+
+                            close(parentSocket);
+
+                            char *client_ip = inet_ntoa(client.sin_addr);
+                            int client_port = ntohs(client.sin_port);
+
+                            int numbytes;
+                            char childBuffer[BUFFERLENGTH];
+                            float number;
+                            Stats disksp;
+
+                            std::string putData = "close";
+
+                            char data[sizeof(Stats)];
+
+                            std::cout<<sizeof(Stats)<<std::endl;
+
+                            if((numbytes = recv(childSocket, &data, sizeof(data), 0)) == -1){
+
+                                std::cout<<"NO"<<std::endl;
+                                perror("recv()");
+                                exit(1);
+                            }
+                            else{
+                                Stats* temp = new Stats;
+                                deserialize(data, temp);
+
+                                childBuffer[numbytes] = '\0';
+                                std::cout<<sizeof(disksp)<<std::endl;
+                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%li\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,temp->loadavg);
+                                // std::cout << "Message: " << disksp.asb << std::endl;
+                                send(childSocket,putData.c_str(),putData.size(),MSG_CONFIRM);
+                                close(childSocket);
+                                exit(-1);
+                            }
+                        }
+
+                        // close(childSocket);
+                        // exit(-1);
+                    }
+                default:    // Parent
+                    close(childSocket);
+                    continue;
+            }
+        }
+    }
+     
     return 0;
+
 }
