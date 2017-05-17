@@ -282,7 +282,6 @@ typedef struct Stats {
     unsigned long sab; //available swap in bytes
 
     long upt; //uptime in seconds
-
     long loadavg;
 } stats;
 
@@ -428,7 +427,7 @@ int main(int argc , char *argv[])
 
                                 childBuffer[numbytes] = '\0';
                                 std::cout<<sizeof(disksp)<<std::endl;
-                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%li\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,temp->loadavg);
+                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
                                 // std::cout << "Message: " << disksp.asb << std::endl;
                                 send(childSocket,putData.c_str(),putData.size(),MSG_CONFIRM);
                                 close(childSocket);

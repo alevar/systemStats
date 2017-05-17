@@ -311,8 +311,8 @@ void getCPU(Stats* stats){
 
     // loadavg = ((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]));
     // printf("The current CPU utilization is : %Lf\n",loadavg);
-
-    stats->loadavg = (long)(((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))*10);
+    // std::cout<<"LOAD: "<<((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))<<std::endl;
+    stats->loadavg = (long)(((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))*100);
 }
 
 void getOther(Stats* stats){
@@ -369,6 +369,15 @@ bool comp(const std::tuple<long,int,std::string>& a, const std::tuple<long,int,s
     return std::get<1>(a) > std::get<1>(b);
 }
 
+unsigned long getUID(std::string path){
+    FILE *fp;
+    unsigned long uid;
+    fp = fopen(path.c_str(),"r");
+    fscanf(fp,"%lu",&uid);
+    fclose(fp);
+    return uid;
+}
+
 void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
     DIR* proc = opendir("/proc");
     struct dirent* ent;
@@ -388,7 +397,14 @@ void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
         fp = fopen(path,"r");
         fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
         fclose(fp);
-        procs->push_back(std::make_tuple(tgid,a[0],"sparrow"));
+        struct passwd *pw;
+
+        snprintf(path, 40, "/proc/%ld/loginuid", tgid);
+        unsigned long uid = getUID(path);
+        if (uid != (unsigned int)-1){
+            pw = getpwuid((uid_t)uid);
+            procs->push_back(std::make_tuple(tgid,a[0],pw->pw_name));
+        }
     }
     closedir(proc);
 
@@ -472,7 +488,15 @@ void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string>> 
         unsigned long totalTime = pinfo->utime+pinfo->stime;
         float seconds = (float)uptime-((float)pinfo->starttime/(float)hertz);
         float cpu_usage = 100*(((float)totalTime/(float)hertz)/seconds);
-        procs->push_back(std::make_tuple(tgid,cpu_usage,"sparrow"));
+
+        struct passwd *pw;
+
+        snprintf(path, 40, "/proc/%ld/loginuid", tgid);
+        unsigned long uid = getUID(path);
+        if (uid != (unsigned int)-1){
+            pw = getpwuid((uid_t)uid);
+            procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name));
+        }
     }
     closedir(proc);
     sort(procs->begin(),procs->end(),comp);
@@ -518,7 +542,7 @@ void serialize(Stats* msgPacket, char *data){
     *q = msgPacket->sab;       q++;
 
     long *w = (long*)q;
-    *w = msgPacket->upt;
+    *w = msgPacket->upt;       w++;
     *w = msgPacket->loadavg;
 }
 
@@ -621,7 +645,7 @@ int main(int argc , char *argv[]){
             server.sin_port = htons( destinationPort );
 
             std::cout<<sizeof(Stats)<<std::endl;
-            printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%li\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,stats.loadavg);
+            printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
 
             if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
                 std::cout << "CONNECT ERROR" << std::endl;
