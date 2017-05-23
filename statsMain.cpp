@@ -27,6 +27,8 @@
 #include <time.h>
 #include <bitset>
 
+#include <sstream>
+
 #define DESTINATION_ADDRESS "127.0.0.1"
 #define PORT    8886
 #define MAXDATASIZE 3000000 // max number of bytes
@@ -276,6 +278,9 @@ typedef struct Stats {
     long upt; //uptime in seconds
 
     long loadavg; //rounded. needs to be devided by 10
+
+    std::string memPID;
+    std::string cpuPID;
 } stats;
 
 void getDiskSpace(const char *path,Stats* stats){
@@ -365,7 +370,7 @@ and return top n processes
 Perhaps it will only be called if the system load is above a certain threshhold
 */
 
-bool comp(const std::tuple<long,int,std::string>& a, const std::tuple<long,int,std::string>& b){
+bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tuple<long,int,std::string,std::string>& b){
     return std::get<1>(a) > std::get<1>(b);
 }
 
@@ -378,7 +383,14 @@ unsigned long getUID(std::string path){
     return uid;
 }
 
-void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
+void getCMD(std::string path,char* cmd){
+    FILE *fp;
+    fp = fopen(path.c_str(),"r");
+    fscanf(fp,"%s",cmd);
+    fclose(fp);
+}
+
+void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *procs) {
     DIR* proc = opendir("/proc");
     struct dirent* ent;
     long tgid;
@@ -402,8 +414,12 @@ void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
         snprintf(path, 40, "/proc/%ld/loginuid", tgid);
         unsigned long uid = getUID(path);
         if (uid != (unsigned int)-1){
+            snprintf(path, 40, "/proc/%ld/cmdline", tgid);
+            char comm[1000];
+            getCMD(path,comm);
+
             pw = getpwuid((uid_t)uid);
-            procs->push_back(std::make_tuple(tgid,a[0],pw->pw_name));
+            procs->push_back(std::make_tuple(tgid,a[0],pw->pw_name,std::string(comm)));
         }
     }
     closedir(proc);
@@ -412,7 +428,7 @@ void parseStatm(std::vector<std::tuple <long,int,std::string>> *procs) {
     procs->resize(10);
 }
 
-void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string>> *procs,long uptime){
+void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime){
     DIR* proc = opendir("/proc");
     int hertz = sysconf(_SC_CLK_TCK);
     struct dirent* ent;
@@ -495,7 +511,12 @@ void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string>> 
         unsigned long uid = getUID(path);
         if (uid != (unsigned int)-1){
             pw = getpwuid((uid_t)uid);
-            procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name));
+
+            snprintf(path, 40, "/proc/%ld/cmdline", tgid);
+            char comm[1000];
+            getCMD(path,comm);
+
+            procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name,std::string(comm)));
         }
     }
     closedir(proc);
@@ -503,32 +524,51 @@ void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string>> 
     procs->resize(10);
 }
 
+template <class T>
+void stringify(std::vector<T>* v,Stats* stats){
+    std::stringstream ss;
+    for(size_t i = 0; i < v->size(); i++){
+        ss<<std::get<0>(v->at(i));
+        ss << "\t";
+        ss<<std::get<1>(v->at(i));
+        ss << "\t";
+        ss<<std::get<2>(v->at(i));
+        ss << "\t";
+        ss<<std::get<3>(v->at(i));
+        ss << "\n";
+    }
+    ss << "\v";
+    stats->memPID = ss.str();
+    // std::cout<<"STRINGED: "<<someString<<std::endl;
+    // stats = std::vector<char>(someString.begin(), someString.end());
+}
+
 void buildStats(Stats* stats){
     getDiskSpace("/",stats);
     getCPU(stats);
     getRAM(stats);
     getOther(stats);
-    // printf("Available Space Percent: %ld%%\n",paramsDisk.asp);
-    // printf("Free CPU load average: %lf%%\n",loadavg);
-    // printf("Free Memory Percent: %lf%%\n",(float)paramsRAM.mab/(float)paramsRAM.mtb);
-    // printf("Free Swap Percent: %lf%%\n",(float)paramsOther.sab/(float)paramsOther.stb);
-    // printf("Uptime: %lds\n",paramsOther.upt);
 
-    std::vector<std::tuple <long,int,std::string>> procMem;
+    // to serialize a vector i need to convert it into a string and serialize a string
+
+    std::vector<std::tuple <long,int,std::string,std::string>> procMem;
     parseStatm(&procMem);
+    stringify(&procMem,stats);
     // for(int i=0;i<procMem.size();i++){
     //     std::cout<<"PID: "<<std::get<0>(procMem[i])<<"  MEM: "<<(std::get<1>(procMem[i])*pageSize)/1024/1024<<"MB"<<std::endl;
     // }
     // std::cout<<"============================="<<std::endl;
     procinfo pinfo;
-    std::vector<std::tuple <long,float,std::string>> procCPU;
+    std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
     parseStat(&pinfo,&procCPU,stats->upt);
+    stringify(&procCPU,stats);
+    std::cout<<"STRING: "<<stats->memPID<<std::endl;
     // for(int i=0;i<procCPU.size();i++){
-    //     std::cout<<"PID: "<<std::get<0>(procCPU[i])<<"  CPU: "<<std::get<1>(procCPU[i])<<"\%"<<std::endl;
+    //     std::cout<<"PID: "<<std::get<0>(procCPU[i])<<"  CPU: "<<std::get<3>(procCPU[i])<<"\%"<<std::endl;
     // }
 }
 
-void serialize(Stats* msgPacket, char *data){
+void serialize(Stats* msgPacket, char *data, long stringSize){
     unsigned long *q = (unsigned long*)data;    
     *q = msgPacket->asb;       q++;    
     *q = msgPacket->fsb;       q++;    
@@ -543,7 +583,18 @@ void serialize(Stats* msgPacket, char *data){
 
     long *w = (long*)q;
     *w = msgPacket->upt;       w++;
-    *w = msgPacket->loadavg;
+    *w = msgPacket->loadavg;   w++;
+
+    long *e = (long*)w;
+    *e = stringSize;           e++;
+
+    char *p = (char*)e;
+    for(int i=0;i<msgPacket->memPID.size();i++){
+        *p = msgPacket->memPID.c_str()[i];  p++;
+    }
+    for(int i=0;i<msgPacket->cpuPID.size();i++){
+        *p = msgPacket->cpuPID.c_str()[i];  p++;
+    }
 }
 
 int main(int argc , char *argv[]){
@@ -621,12 +672,12 @@ int main(int argc , char *argv[]){
     clock_t last_time = this_time;
 
     Stats stats;
+    int totalSize;
+    long stringSize;
 
     while(log){
         this_time = clock();
-
         time_counter += (double)(this_time - last_time);
-
         last_time = this_time;
 
         if(time_counter > (double)(1 * CLOCKS_PER_SEC))
@@ -644,7 +695,6 @@ int main(int argc , char *argv[]){
             server.sin_family = AF_INET;
             server.sin_port = htons( destinationPort );
 
-            std::cout<<sizeof(Stats)<<std::endl;
             printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
 
             if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
@@ -652,9 +702,43 @@ int main(int argc , char *argv[]){
                 return 1;
             }
 
-            char data1[sizeof(Stats)];
-            serialize(&stats, data1);
-            send(socket_desc,data1,sizeof(data1),MSG_CONFIRM);
+            stringSize = stats.memPID.size()+
+                        stats.cpuPID.size();
+            totalSize = sizeof(stats.asb)+
+                        sizeof(stats.fsb)+
+                        sizeof(stats.asp)+
+                        sizeof(stats.fsp)+
+                        sizeof(stats.mtb)+
+                        sizeof(stats.mab)+
+                        sizeof(stats.stb)+
+                        sizeof(stats.sab)+
+                        sizeof(stats.upt)+
+                        sizeof(stats.loadavg)+
+                        stringSize;
+
+            std::cout<<"SIZE:::::"<<stringSize<<std::endl;
+            char data1[totalSize];
+            serialize(&stats, data1,(long)stringSize);
+            char *q = (char*)data1;
+            for(int i=0;i<sizeof(data1);i++){
+                std::cout<<*q;q++;
+            }
+
+            send(socket_desc,data1,sizeof(data1),0);
+
+/*=========================================
+The Protocol
+1.send first packet:
+    - contains all numerical values
+2.receive confirm
+3.send size
+4.receive confirm
+
+5.If no confirmation received until new packet is timed for sending:
+    - retry n number of times
+    - if even connection can not be established:
+        - output server not reachable
+=========================================*/
 
             waitRecv= true;
             while(waitRecv){

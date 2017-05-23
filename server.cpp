@@ -25,6 +25,7 @@
 #include <tuple>
 
 #include <bitset>
+#include <sstream>
 
 typedef struct DiskSpace {
     unsigned long asb; //available space in bytes
@@ -280,14 +281,21 @@ typedef struct Stats {
 
     unsigned long stb; //total swap in bytes
     unsigned long sab; //available swap in bytes
-
     long upt; //uptime in seconds
-    long loadavg;
+
+    long loadavg; //rounded. needs to be devided by 10
+
+    std::string memPID;
+    std::string cpuPID;
 } stats;
 
 #define PORT    1234        // Port used by the server service
 #define BACKLOG 1           // Number of connections to queue
 #define BUFFERLENGTH 3000000    // 300 bytes
+
+void destringify(){
+    std::cout<<"cool"<<std::endl;
+}
 
 void deserialize(char *data, Stats* msgPacket)
 {
@@ -306,6 +314,57 @@ void deserialize(char *data, Stats* msgPacket)
     long *w = (long*)q;
     msgPacket->upt = *w;     w++;
     msgPacket->loadavg = *w; w++;
+
+    long *e = (long*)w;
+    long *stringSize;
+    stringSize = new long;
+    *stringSize = *e;        e++;
+
+    char *p = (char*)e;
+    // for(int i=0;i<200;i++){
+    //     std::cout<<*p; p++;
+    // }
+    // // while(*p){
+    // //     std::cout<<"HELLO TEST: "<<*p; p++;
+    // // }
+    // std::cout<<std::endl;
+    // std::cout<<"CHARRRRRRRR: "<<*(p+2)<<std::endl;
+    std::stringstream ssMEM;
+    std::string mem;
+    std::string buf;
+    std::cout<<"SIZE::::::::"<<*stringSize<<std::endl;
+    for(int i=0;i<*stringSize;i++){
+        ssMEM<<*p; p++;
+    }
+    std::vector<std::tuple <long,int,std::string,std::string>> test;
+
+    for(int i=0;i<10;i++){
+        ssMEM>>buf;
+        long t1 = std::stol(buf);
+        ssMEM>>buf;
+        int t2 = std::atoi(buf.c_str());
+        std::string t3;
+        ssMEM>>t3;
+        std::string t4;
+        ssMEM>>t4;
+        test.push_back(std::make_tuple(t1,t2,t3,t4));
+    }
+
+    std::cout<<"==============================="<<std::endl;
+    for(int i=0;i<10;i++){
+        std::cout<<std::get<0>(test[i])<<"\t"<<std::get<1>(test[i])<<"\t"<<std::get<2>(test[i])<<"\t"<<std::get<3>(test[i])<<std::endl;
+    }
+    std::cout<<"==============================="<<std::endl;
+    delete stringSize;
+    // p=p+3;
+    // std::stringstream ssCPU;
+    // std::string cpu;
+    // while((p!="<")||((p+1)!=";")||((p+1)!=">")){
+    //     ssCPU<<*p;
+    //     // msgPacket->cpuPID.push_back(*p);
+    //     p++;
+    // }
+    // ssCPU>>msgPacket->cpuPID;
 }
 
 int main(int argc , char *argv[])
@@ -396,6 +455,7 @@ int main(int argc , char *argv[])
                 case 0: // Child
                     {
                         bool connectionStatus = true;
+                        printf("CONNECTED\n");
 
                         while (connectionStatus){
 
@@ -411,13 +471,9 @@ int main(int argc , char *argv[])
 
                             std::string putData = "close";
 
-                            char data[sizeof(Stats)];
+                            char data[1000000];
 
-                            std::cout<<sizeof(Stats)<<std::endl;
-
-                            if((numbytes = recv(childSocket, &data, sizeof(data), 0)) == -1){
-
-                                std::cout<<"NO"<<std::endl;
+                            if((numbytes = recv(childSocket, &data, 1000, 0)) == -1){
                                 perror("recv()");
                                 exit(1);
                             }
@@ -426,7 +482,6 @@ int main(int argc , char *argv[])
                                 deserialize(data, temp);
 
                                 childBuffer[numbytes] = '\0';
-                                std::cout<<sizeof(disksp)<<std::endl;
                                 printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
                                 // std::cout << "Message: " << disksp.asb << std::endl;
                                 send(childSocket,putData.c_str(),putData.size(),MSG_CONFIRM);
