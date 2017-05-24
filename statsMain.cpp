@@ -29,9 +29,10 @@
 
 #include <sstream>
 
+#include <unistd.h>
+
 #define DESTINATION_ADDRESS "127.0.0.1"
 #define PORT    8886
-#define MAXDATASIZE 3000000 // max number of bytes
 
 int pageSize = getpagesize();
 
@@ -314,9 +315,6 @@ void getCPU(Stats* stats){
     fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&b[0],&b[1],&b[2],&b[3]);
     fclose(fp);
 
-    // loadavg = ((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]));
-    // printf("The current CPU utilization is : %Lf\n",loadavg);
-    // std::cout<<"LOAD: "<<((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))<<std::endl;
     stats->loadavg = (long)(((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))*100);
 }
 
@@ -539,8 +537,6 @@ void stringify(std::vector<T>* v,Stats* stats){
     }
     ss << "\v";
     stats->memPID = ss.str();
-    // std::cout<<"STRINGED: "<<someString<<std::endl;
-    // stats = std::vector<char>(someString.begin(), someString.end());
 }
 
 void buildStats(Stats* stats){
@@ -554,22 +550,19 @@ void buildStats(Stats* stats){
     std::vector<std::tuple <long,int,std::string,std::string>> procMem;
     parseStatm(&procMem);
     stringify(&procMem,stats);
-    // for(int i=0;i<procMem.size();i++){
-    //     std::cout<<"PID: "<<std::get<0>(procMem[i])<<"  MEM: "<<(std::get<1>(procMem[i])*pageSize)/1024/1024<<"MB"<<std::endl;
-    // }
-    // std::cout<<"============================="<<std::endl;
+
     procinfo pinfo;
     std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
     parseStat(&pinfo,&procCPU,stats->upt);
     stringify(&procCPU,stats);
-    std::cout<<"STRING: "<<stats->memPID<<std::endl;
-    // for(int i=0;i<procCPU.size();i++){
-    //     std::cout<<"PID: "<<std::get<0>(procCPU[i])<<"  CPU: "<<std::get<3>(procCPU[i])<<"\%"<<std::endl;
-    // }
+    std::cout<<stats->memPID<<std::endl;
 }
 
 void serialize(Stats* msgPacket, char *data, long stringSize){
-    unsigned long *q = (unsigned long*)data;    
+    long *e = (long*)data;
+    *e = stringSize;           e++;
+
+    unsigned long *q = (unsigned long*)e;    
     *q = msgPacket->asb;       q++;    
     *q = msgPacket->fsb;       q++;    
     *q = msgPacket->asp;       q++;
@@ -585,10 +578,7 @@ void serialize(Stats* msgPacket, char *data, long stringSize){
     *w = msgPacket->upt;       w++;
     *w = msgPacket->loadavg;   w++;
 
-    long *e = (long*)w;
-    *e = stringSize;           e++;
-
-    char *p = (char*)e;
+    char *p = (char*)w;
     for(int i=0;i<msgPacket->memPID.size();i++){
         *p = msgPacket->memPID.c_str()[i];  p++;
     }
@@ -651,23 +641,14 @@ int main(int argc , char *argv[]){
     struct sockaddr_in server;
     bool connectionStatus = true;
     int numbytes;
-    char buf[MAXDATASIZE];
-
-    // if((numbytes = recv(socket_desc, buf, MAXDATASIZE-1, 0)) == -1){
-    //     perror("recv()");
-    //     exit(1);
-    // }
-    // else{
-    //     buf[numbytes] = '\0';
-    // }
+    int closeCall;
 
     std::string putData = "hello server!";
     bool waitRecv;
     std::string incomingData;
     bool log = true;
 
-    int count = 1;
-    double time_counter = 0;
+    // double time_counter = 0;
     clock_t this_time = clock();
     clock_t last_time = this_time;
 
@@ -676,13 +657,13 @@ int main(int argc , char *argv[]){
     long stringSize;
 
     while(log){
-        this_time = clock();
-        time_counter += (double)(this_time - last_time);
-        last_time = this_time;
+        // this_time = clock();
+        // time_counter += (double)(this_time - last_time);
+        // last_time = this_time;
 
-        if(time_counter > (double)(1 * CLOCKS_PER_SEC))
-        {
-            time_counter -= (double)(1 * CLOCKS_PER_SEC);
+        // if(time_counter > (double)(1 * CLOCKS_PER_SEC))
+        // {
+            // time_counter -= (double)(1 * CLOCKS_PER_SEC);
             
             buildStats(&stats);
 
@@ -716,13 +697,9 @@ int main(int argc , char *argv[]){
                         sizeof(stats.loadavg)+
                         stringSize;
 
-            std::cout<<"SIZE:::::"<<stringSize<<std::endl;
             char data1[totalSize];
-            serialize(&stats, data1,(long)stringSize);
+            serialize(&stats, data1,(long)totalSize);
             char *q = (char*)data1;
-            for(int i=0;i<sizeof(data1);i++){
-                std::cout<<*q;q++;
-            }
 
             send(socket_desc,data1,sizeof(data1),0);
 
@@ -742,21 +719,22 @@ The Protocol
 
             waitRecv= true;
             while(waitRecv){
-                if((numbytes = recv(socket_desc, buf, MAXDATASIZE-1, 0)) == -1){
+                if((numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
                     perror("recv()");
                     exit(1);
                 }
                 else{
-                    buf[numbytes] = '\0';
-                    incomingData = buf;
                     waitRecv = false;
-                    std::cout << incomingData << std::endl;
-                    close(socket_desc);
+                    std::cout << closeCall << std::endl;
+                    if(closeCall==1){
+                        close(socket_desc);
+                    }
                 }
             }
 
-            count++;
-        }
+            sleep(5);
+
+        // }
     }
 
     return 0;

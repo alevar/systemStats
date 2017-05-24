@@ -293,11 +293,7 @@ typedef struct Stats {
 #define BACKLOG 1           // Number of connections to queue
 #define BUFFERLENGTH 3000000    // 300 bytes
 
-void destringify(){
-    std::cout<<"cool"<<std::endl;
-}
-
-void deserialize(char *data, Stats* msgPacket)
+void deserialize(char *data, Stats* msgPacket,long* stringSize)
 {
     unsigned long *q = (unsigned long*)data;    
     msgPacket->asb = *q;     q++;    
@@ -315,24 +311,11 @@ void deserialize(char *data, Stats* msgPacket)
     msgPacket->upt = *w;     w++;
     msgPacket->loadavg = *w; w++;
 
-    long *e = (long*)w;
-    long *stringSize;
-    stringSize = new long;
-    *stringSize = *e;        e++;
+    char *p = (char*)w;
 
-    char *p = (char*)e;
-    // for(int i=0;i<200;i++){
-    //     std::cout<<*p; p++;
-    // }
-    // // while(*p){
-    // //     std::cout<<"HELLO TEST: "<<*p; p++;
-    // // }
-    // std::cout<<std::endl;
-    // std::cout<<"CHARRRRRRRR: "<<*(p+2)<<std::endl;
     std::stringstream ssMEM;
     std::string mem;
     std::string buf;
-    std::cout<<"SIZE::::::::"<<*stringSize<<std::endl;
     for(int i=0;i<*stringSize;i++){
         ssMEM<<*p; p++;
     }
@@ -355,16 +338,6 @@ void deserialize(char *data, Stats* msgPacket)
         std::cout<<std::get<0>(test[i])<<"\t"<<std::get<1>(test[i])<<"\t"<<std::get<2>(test[i])<<"\t"<<std::get<3>(test[i])<<std::endl;
     }
     std::cout<<"==============================="<<std::endl;
-    delete stringSize;
-    // p=p+3;
-    // std::stringstream ssCPU;
-    // std::string cpu;
-    // while((p!="<")||((p+1)!=";")||((p+1)!=">")){
-    //     ssCPU<<*p;
-    //     // msgPacket->cpuPID.push_back(*p);
-    //     p++;
-    // }
-    // ssCPU>>msgPacket->cpuPID;
 }
 
 int main(int argc , char *argv[])
@@ -469,24 +442,43 @@ int main(int argc , char *argv[])
                             float number;
                             Stats disksp;
 
-                            std::string putData = "close";
+                            char putData[sizeof(int)];
+                            int *e = (int*)putData;
+                            *e = 1;
 
-                            char data[1000000];
+                            long totalSize;
 
-                            if((numbytes = recv(childSocket, &data, 1000, 0)) == -1){
+                            if((numbytes = recv(childSocket, &totalSize, sizeof(totalSize), 0)) == -1){
                                 perror("recv()");
                                 exit(1);
                             }
                             else{
                                 Stats* temp = new Stats;
-                                deserialize(data, temp);
+                                long sizePID = totalSize-(long)(sizeof(temp->asb)+
+                                                               sizeof(temp->fsb)+
+                                                               sizeof(temp->asp)+
+                                                               sizeof(temp->fsp)+
+                                                               sizeof(temp->mtb)+
+                                                               sizeof(temp->mab)+
+                                                               sizeof(temp->stb)+
+                                                               sizeof(temp->sab)+
+                                                               sizeof(temp->upt)+
+                                                               sizeof(temp->loadavg));
+                                char data[totalSize];
 
-                                childBuffer[numbytes] = '\0';
-                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
-                                // std::cout << "Message: " << disksp.asb << std::endl;
-                                send(childSocket,putData.c_str(),putData.size(),MSG_CONFIRM);
-                                close(childSocket);
-                                exit(-1);
+                                if((numbytes = recv(childSocket, &data, totalSize, 0)) == -1){
+                                    perror("recv()");
+                                    exit(1);
+                                }
+                                else{
+                                    deserialize(data, temp, &sizePID);
+
+                                    childBuffer[numbytes] = '\0';
+                                    printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
+                                    send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
+                                    close(childSocket);
+                                    exit(-1);
+                                }
                             }
                         }
 
