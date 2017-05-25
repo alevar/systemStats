@@ -5,50 +5,26 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/sysinfo.h>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <netdb.h>
-
 #include <sys/types.h>
 #include <dirent.h>
 #include <ctype.h>
 #include <utility>
-
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <unistd.h>
 #include <pwd.h>
 #include <tuple>
-
 #include <bitset>
 #include <sstream>
 
-typedef struct DiskSpace {
-    unsigned long asb; //available space in bytes
-    unsigned long fsb; //free space in bytes
-    unsigned long asp; //available space in percent
-    unsigned long fsp; //free space in percent
-} disksp;
-// #pragma pack(0)
-// #pragma pack(1)
-typedef struct RAM {
-    unsigned long mtb; //total memory in bytes
-    unsigned long mab; //memory available in bytes
-} memory;
-// #pragma pack(0)
-// #pragma pack(1)
-typedef struct OTHER {
-    unsigned long stb; //total swap in bytes
-    unsigned long sab; //available swap in bytes
-    long upt; //uptime in seconds
-} other;
+#define BACKLOG 1           // Number of connections to queue
 
-// #pragma pack(0)
-// #pragma pack(1)
 typedef struct procSTAT {
     //"%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d"
      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
@@ -270,28 +246,270 @@ typedef struct procSTAT {
                         waitpid(2).*/
 } procinfo;
 
+typedef struct DiskSpace {
+    unsigned long asb; //available space in bytes
+    unsigned long fsb; //free space in bytes
+    unsigned long asp; //available space in percent
+    unsigned long fsp; //free space in percent
+} disksp;
+
+typedef struct RAM {
+    unsigned long mtb; //total memory in bytes
+    unsigned long mab; //memory available in bytes
+} memory;
+
+typedef struct OTHER {
+    unsigned long stb; //total swap in bytes
+    unsigned long sab; //available swap in bytes
+    long upt; //uptime in seconds
+} other;
+
 typedef struct Stats {
     unsigned long asb; //available space in bytes
     unsigned long fsb; //free space in bytes
     unsigned long asp; //available space in percent
     unsigned long fsp; //free space in percent
-
     unsigned long mtb; //total memory in bytes
     unsigned long mab; //memory available in bytes
-
     unsigned long stb; //total swap in bytes
     unsigned long sab; //available swap in bytes
     long upt; //uptime in seconds
-
     long loadavg; //rounded. needs to be devided by 10
 
     std::string memPID;
     std::string cpuPID;
 } stats;
 
-#define PORT    1234        // Port used by the server service
-#define BACKLOG 1           // Number of connections to queue
-#define BUFFERLENGTH 3000000    // 300 bytes
+void deserialize(char *data, Stats* msgPacket,long* stringSize);
+
+int main(int argc , char *argv[])
+{
+    int c;
+    int serverPort;
+    int this_option_optind;
+    int option_index;
+    int parentSocket, childSocket, addrlen;
+    struct sockaddr_in server, client;
+
+    while (1) {
+        this_option_optind = optind ? optind : 1;
+        option_index = 0;
+        static struct option long_options[] = {
+            {"port",     required_argument, 0,  0 },
+            {0,         0,                 0,  0 }
+        };
+
+        c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
+        if (c == -1){
+            break;
+        }
+
+        switch (c) {
+            case 0:
+                serverPort = atoi(optarg);
+                break;
+
+            case '?':
+                break;
+
+            default:
+                printf("?? getopt returned character code 0%o ??\n", c);
+        }
+    }
+
+    if (optind < argc) {
+        printf("non-option ARGV-elements: ");
+        while (optind < argc)
+            printf("%s ", argv[optind++]);
+        printf("\n");
+    }
+
+    if((parentSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0)
+    {
+        printf("Could not create socket");
+        close(parentSocket);
+        exit(-1);
+    }
+
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr("0.0.0.0"); // Autofill with my ip (lcalhost)
+    server.sin_port = htons(serverPort);
+
+    memset(&(server.sin_zero), 0, 8); // Set zero values to the rest of the server structure
+     
+    //Bind
+    if( bind(parentSocket,(struct sockaddr *)&server , sizeof(server)) < 0)
+    {
+        puts("bind failed");
+        close(parentSocket);
+        exit(-1);
+    }
+    puts("binding successful");
+     
+    listen(parentSocket, BACKLOG);
+    puts("Waiting for incoming connections...");
+    addrlen = sizeof(struct sockaddr_in);
+
+    while(true){
+        if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
+            close(childSocket);
+            exit(-1);
+        }
+
+        else{
+            pid_t *new_fork = new pid_t;
+            switch(*new_fork = fork()){
+                case -1: // Error
+                    {
+                        perror("forking failed");
+                        close(parentSocket);
+                        close(childSocket);
+                        exit(-1);
+                    }
+                case 0: // Child
+                    {
+                        printf("CONNECTED\n");
+                        close(parentSocket);
+
+                        Stats* temp = new Stats;
+                        int* numbytes = new int;
+                        long* totalSize = new long;
+                        long* sizePID = new long;
+                        int* putData = new int;
+                        *putData = 1;
+
+                        char *client_ip = inet_ntoa(client.sin_addr);
+                        int client_port = ntohs(client.sin_port);
+
+                        if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
+                            perror("recv()");
+                            exit(1);
+                        }
+                        else{
+                            *sizePID = *totalSize-(long)(sizeof(temp->asb)+
+                                                            sizeof(temp->fsb)+
+                                                            sizeof(temp->asp)+
+                                                            sizeof(temp->fsp)+
+                                                            sizeof(temp->mtb)+
+                                                            sizeof(temp->mab)+
+                                                            sizeof(temp->stb)+
+                                                            sizeof(temp->sab)+
+                                                            sizeof(temp->upt)+
+                                                            sizeof(temp->loadavg));
+                            char data[*totalSize];
+
+                            if((*numbytes = recv(childSocket, &data, *totalSize, 0)) == -1){
+                                perror("recv()");
+                                exit(1);
+                            }
+                            else{
+                                deserialize(data, temp, sizePID);
+                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
+                                send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
+                            }
+                            delete temp;
+                        }
+                        delete numbytes;
+                        delete totalSize;
+                        delete sizePID;
+                        delete putData;
+                    }
+                default:    // Parent
+                    close(childSocket);
+                    delete new_fork;
+                    continue;
+            }
+        }
+    }
+    return 0;
+
+    // while(true){
+    //     if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
+    //         close(childSocket);
+    //         exit(-1);
+    //     }
+
+    //     else{
+    //      pid_t *new_fork = new pid_t;
+    //      std::cout<<"NEW FORK: "<<*new_fork<<std::endl;
+    //         switch(*new_fork = fork()){
+    //             case -1: // Error
+    //                 {
+    //                     perror("forking failed");
+    //                     close(parentSocket);
+    //                     close(childSocket);
+    //                     exit(-1);
+    //                 }
+    //             case 0: // Child
+    //                 {
+    //                     bool* connectionStatus = new bool;
+    //                     Stats* temp = new Stats;
+    //                     int* numbytes = new int;
+    //                     long* totalSize = new long;
+    //                     long* sizePID = new long;
+    //                     int* putData = new int;
+    //                     *putData = 1;
+
+    //                     std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
+
+    //                      *connectionStatus = true;
+    //                     char *client_ip = inet_ntoa(client.sin_addr);
+    //                     int client_port = ntohs(client.sin_port);
+
+    //                     printf("CONNECTED\n");
+
+    //                     while (*connectionStatus){
+    //                         close(parentSocket);
+
+    //                         if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
+    //                             perror("recv()");
+    //                             exit(1);
+    //                         }
+    //                         else{
+    //                             *sizePID = *totalSize-(long)(sizeof(temp->asb)+
+    //                                                             sizeof(temp->fsb)+
+    //                                                             sizeof(temp->asp)+
+    //                                                             sizeof(temp->fsp)+
+    //                                                             sizeof(temp->mtb)+
+    //                                                             sizeof(temp->mab)+
+    //                                                             sizeof(temp->stb)+
+    //                                                             sizeof(temp->sab)+
+    //                                                             sizeof(temp->upt)+
+    //                                                             sizeof(temp->loadavg));
+    //                             char data[*totalSize];
+
+    //                             if((*numbytes = recv(childSocket, &data, *totalSize, 0)) == -1){
+    //                                 perror("recv()");
+    //                                 exit(1);
+    //                             }
+    //                             else{
+    //                                 deserialize(data, temp, sizePID);
+
+    //                                 printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
+    //                                 send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
+    //                                 *connectionStatus = false;
+    //                                 std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
+    //                             }
+    //                             delete temp;
+    //                         }
+    //                     }
+    //                     close(childSocket);
+    //                     delete connectionStatus;
+    //                     delete numbytes;
+    //                     delete totalSize;
+    //                     delete sizePID;
+    //                     delete putData;
+             //            delete new_fork;
+             //            std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
+    //                 }
+    //             default:    // Parent
+    //                 close(childSocket);
+    //                 continue;
+    //         }
+    //     }
+    // }
+    // return 0;
+}
 
 void deserialize(char *data, Stats* msgPacket,long* stringSize)
 {
@@ -338,160 +556,4 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         std::cout<<std::get<0>(test[i])<<"\t"<<std::get<1>(test[i])<<"\t"<<std::get<2>(test[i])<<"\t"<<std::get<3>(test[i])<<std::endl;
     }
     std::cout<<"==============================="<<std::endl;
-}
-
-int main(int argc , char *argv[])
-{
-    int c;
-
-    int serverPort;
-
-    while (1) {
-        int this_option_optind = optind ? optind : 1;
-        int option_index = 0;
-        static struct option long_options[] = {
-            {"port",     required_argument, 0,  0 },
-            {0,         0,                 0,  0 }
-        };
-
-        c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
-        if (c == -1){
-            break;
-        }
-
-        switch (c) {
-            case 0:
-                serverPort = atoi(optarg);
-                break;
-
-            case '?':
-                break;
-
-            default:
-                printf("?? getopt returned character code 0%o ??\n", c);
-        }
-    }
-
-    if (optind < argc) {
-        printf("non-option ARGV-elements: ");
-        while (optind < argc)
-            printf("%s ", argv[optind++]);
-        printf("\n");
-    }
-
-    char parrentBuffer[BUFFERLENGTH];
-    int parentSocket, childSocket, addrlen;
-    struct sockaddr_in server, client;
-
-    if((parentSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0)
-    {
-        printf("Could not create socket");
-        close(parentSocket);
-        exit(-1);
-    }
-
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("0.0.0.0"); // Autofill with my ip (lcalhost)
-    server.sin_port = htons( serverPort );
-
-    memset(&(server.sin_zero), 0, 8); // Set zero values to the rest of the server structure
-     
-    //Bind
-    if( bind(parentSocket,(struct sockaddr *)&server , sizeof(server)) < 0)
-    {
-        puts("bind failed");
-        close(parentSocket);
-        exit(-1);
-    }
-    puts("binding successful");
-     
-    listen(parentSocket , BACKLOG);
-    puts("Waiting for incoming connections...");
-    addrlen = sizeof(struct sockaddr_in);
-
-    while(true){
-        if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
-            close(childSocket);
-            exit(-1);
-        }
-
-        else{
-            switch(pid_t new_fork = fork())
-            {
-                case -1: // Error
-                    {
-                        perror("forking failed");
-                        close(parentSocket);
-                        close(childSocket);
-                        exit(-1);
-                    }
-                case 0: // Child
-                    {
-                        bool connectionStatus = true;
-                        printf("CONNECTED\n");
-
-                        while (connectionStatus){
-
-                            close(parentSocket);
-
-                            char *client_ip = inet_ntoa(client.sin_addr);
-                            int client_port = ntohs(client.sin_port);
-
-                            int numbytes;
-                            char childBuffer[BUFFERLENGTH];
-                            float number;
-                            Stats disksp;
-
-                            char putData[sizeof(int)];
-                            int *e = (int*)putData;
-                            *e = 1;
-
-                            long totalSize;
-
-                            if((numbytes = recv(childSocket, &totalSize, sizeof(totalSize), 0)) == -1){
-                                perror("recv()");
-                                exit(1);
-                            }
-                            else{
-                                Stats* temp = new Stats;
-                                long sizePID = totalSize-(long)(sizeof(temp->asb)+
-                                                               sizeof(temp->fsb)+
-                                                               sizeof(temp->asp)+
-                                                               sizeof(temp->fsp)+
-                                                               sizeof(temp->mtb)+
-                                                               sizeof(temp->mab)+
-                                                               sizeof(temp->stb)+
-                                                               sizeof(temp->sab)+
-                                                               sizeof(temp->upt)+
-                                                               sizeof(temp->loadavg));
-                                char data[totalSize];
-
-                                if((numbytes = recv(childSocket, &data, totalSize, 0)) == -1){
-                                    perror("recv()");
-                                    exit(1);
-                                }
-                                else{
-                                    deserialize(data, temp, &sizePID);
-
-                                    childBuffer[numbytes] = '\0';
-                                    printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
-                                    send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
-                                    close(childSocket);
-                                    exit(-1);
-                                }
-                            }
-                        }
-
-                        // close(childSocket);
-                        // exit(-1);
-                    }
-                default:    // Parent
-                    close(childSocket);
-                    continue;
-            }
-        }
-    }
-     
-    return 0;
-
 }

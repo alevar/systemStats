@@ -5,34 +5,25 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/sysinfo.h>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <netdb.h>
-
 #include <sys/types.h>
 #include <dirent.h>
 #include <ctype.h>
 #include <utility>
-
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <unistd.h>
 #include <pwd.h>
 #include <tuple>
-
 #include <time.h>
 #include <bitset>
-
 #include <sstream>
-
 #include <unistd.h>
-
-#define DESTINATION_ADDRESS "127.0.0.1"
-#define PORT    8886
 
 int pageSize = getpagesize();
 
@@ -41,8 +32,6 @@ int pageSize = getpagesize();
 // include top n users by cpu and by memory
 // see if possible to not swap the process without root permission
 
-// #pragma pack(0)
-// #pragma pack(1)
 typedef struct procSTAT {
     //"%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d"
      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
@@ -263,7 +252,6 @@ typedef struct procSTAT {
     double exit_code; /*%d  (since Linux 3.5)  [PT] The thread's exit status in the form reported by
                         waitpid(2).*/
 } procinfo;
-// #pragma pack(0)
 
 typedef struct Stats {
     unsigned long asb; //available space in bytes
@@ -291,10 +279,6 @@ void getDiskSpace(const char *path,Stats* stats){
     int ret = statvfs("/",&buf);
     unsigned long freeBlocks = buf.f_bfree;
     stat("/",&fi);
-    // unsigned long availableSpaceB = buf.f_bavail*buf.f_bsize;
-    // unsigned long freeSpaceB = buf.f_bfree*buf.f_bsize;
-    // unsigned long availableSpacePercent = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
-    // unsigned long freeSpacePercent = 100.0 * (double)buf.f_bfree / (double)buf.f_blocks;
     stats->asb = buf.f_bavail*buf.f_bsize;
     stats->fsb = buf.f_bfree*buf.f_bsize;
     stats->asp = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
@@ -321,7 +305,6 @@ void getCPU(Stats* stats){
 void getOther(Stats* stats){
     struct sysinfo info;
     sysinfo(&info);
-    // return{info.totalswap,info.freeswap,info.uptime};
     stats->stb = info.totalswap;
     stats->sab = info.freeswap;
     stats->upt = info.uptime;
@@ -354,7 +337,6 @@ void getRAM(Stats* stats){
 
         }
         fclose(fp);
-        // return{(size_t)totalMem,(size_t)(freeMem+cacheMem+bufMem)};
         stats->mtb = (size_t)totalMem;
         stats->mab = (size_t)(freeMem+cacheMem+bufMem);
     }
@@ -545,8 +527,6 @@ void buildStats(Stats* stats){
     getRAM(stats);
     getOther(stats);
 
-    // to serialize a vector i need to convert it into a string and serialize a string
-
     std::vector<std::tuple <long,int,std::string,std::string>> procMem;
     parseStatm(&procMem);
     stringify(&procMem,stats);
@@ -592,6 +572,7 @@ int main(int argc , char *argv[]){
     int c;
     int serverPort;
     int destinationPort;
+    int updateSec;
     char * destinationAddress;
 
     while (1) {
@@ -600,6 +581,7 @@ int main(int argc , char *argv[]){
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
             {"addr",     required_argument, 0,  0 },
+            {"sec",     required_argument, 0,  0 },
             {0,         0,                 0,  0 }
         };
 
@@ -618,6 +600,10 @@ int main(int argc , char *argv[]){
                     if (long_options[option_index].name == "addr"){
                         destinationAddress = optarg;
                         printf("ADDR SET TO: %s\n", destinationAddress);
+                    }
+                    if (long_options[option_index].name == "sec"){
+                        updateSec = atoi(optarg);
+                        printf("UPDATE TIME SET TO: %s\n", optarg);
                     }
                 }
                 break;
@@ -639,103 +625,71 @@ int main(int argc , char *argv[]){
 
     int socket_desc;
     struct sockaddr_in server;
-    bool connectionStatus = true;
     int numbytes;
     int closeCall;
 
-    std::string putData = "hello server!";
     bool waitRecv;
-    std::string incomingData;
     bool log = true;
-
-    // double time_counter = 0;
-    clock_t this_time = clock();
-    clock_t last_time = this_time;
 
     Stats stats;
     int totalSize;
     long stringSize;
 
     while(log){
-        // this_time = clock();
-        // time_counter += (double)(this_time - last_time);
-        // last_time = this_time;
+  
+        buildStats(&stats);
 
-        // if(time_counter > (double)(1 * CLOCKS_PER_SEC))
-        // {
-            // time_counter -= (double)(1 * CLOCKS_PER_SEC);
-            
-            buildStats(&stats);
+        socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+        if (socket_desc == -1){
+            std::cout << "COULD NOT CREATE SOCKET" << std::endl;
+        }
+             
+        server.sin_addr.s_addr = inet_addr(destinationAddress);
+        server.sin_family = AF_INET;
+        server.sin_port = htons( destinationPort );
 
-            socket_desc = socket(AF_INET , SOCK_STREAM , 0);
-            if (socket_desc == -1){
-                std::cout << "COULD NOT CREATE SOCKET" << std::endl;
+        printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
+
+        if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
+            std::cout << "CONNECT ERROR" << std::endl;
+            return 1;
+        }
+
+        stringSize = stats.memPID.size()+
+                    stats.cpuPID.size();
+        totalSize = sizeof(stats.asb)+
+                    sizeof(stats.fsb)+
+                    sizeof(stats.asp)+
+                    sizeof(stats.fsp)+
+                    sizeof(stats.mtb)+
+                    sizeof(stats.mab)+
+                    sizeof(stats.stb)+
+                    sizeof(stats.sab)+
+                    sizeof(stats.upt)+
+                    sizeof(stats.loadavg)+
+                    stringSize;
+
+        char data1[totalSize];
+        serialize(&stats, data1,(long)totalSize);
+        char *q = (char*)data1;
+
+        send(socket_desc,data1,sizeof(data1),0);
+
+        waitRecv= true;
+        while(waitRecv){
+            if((numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
+                perror("recv()");
+                exit(1);
             }
-                 
-            server.sin_addr.s_addr = inet_addr(destinationAddress);
-            server.sin_family = AF_INET;
-            server.sin_port = htons( destinationPort );
-
-            printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
-
-            if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
-                std::cout << "CONNECT ERROR" << std::endl;
-                return 1;
-            }
-
-            stringSize = stats.memPID.size()+
-                        stats.cpuPID.size();
-            totalSize = sizeof(stats.asb)+
-                        sizeof(stats.fsb)+
-                        sizeof(stats.asp)+
-                        sizeof(stats.fsp)+
-                        sizeof(stats.mtb)+
-                        sizeof(stats.mab)+
-                        sizeof(stats.stb)+
-                        sizeof(stats.sab)+
-                        sizeof(stats.upt)+
-                        sizeof(stats.loadavg)+
-                        stringSize;
-
-            char data1[totalSize];
-            serialize(&stats, data1,(long)totalSize);
-            char *q = (char*)data1;
-
-            send(socket_desc,data1,sizeof(data1),0);
-
-/*=========================================
-The Protocol
-1.send first packet:
-    - contains all numerical values
-2.receive confirm
-3.send size
-4.receive confirm
-
-5.If no confirmation received until new packet is timed for sending:
-    - retry n number of times
-    - if even connection can not be established:
-        - output server not reachable
-=========================================*/
-
-            waitRecv= true;
-            while(waitRecv){
-                if((numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
-                    perror("recv()");
-                    exit(1);
-                }
-                else{
-                    waitRecv = false;
-                    std::cout << closeCall << std::endl;
-                    if(closeCall==1){
-                        close(socket_desc);
-                    }
+            else{
+                waitRecv = false;
+                std::cout << closeCall << std::endl;
+                if(closeCall==1){
+                    close(socket_desc);
                 }
             }
-
-            sleep(5);
-
-        // }
+        }
+        sleep(updateSec);
     }
-
     return 0;
 }
