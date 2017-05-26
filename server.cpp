@@ -287,11 +287,20 @@ typedef struct Stats {
     std::string cpuPID;
 } stats;
 
+typedef struct CurTime {
+    long timeYEAR;
+    long timeMONTH;
+    long timeDAY;
+    long timeHOUR;
+    long timeMIN;
+    long timeSEC;
+} curTime;
+
 template <class T>
 void stringify(std::vector<T>* v,std::string* stats);
 void deserialize(char *data, Stats* msgPacket,long* stringSize);
 void log(Stats*,FILE*);
-void getTime(Stats*);
+void getTime(CurTime*);
 void delay(Stats*);
 
 int main(int argc , char *argv[])
@@ -578,11 +587,30 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
 void log(Stats* stats,FILE* fp){
     //send time
     //received time
-    fputs (stats->memPID.c_str(),fp);
-    fputs (stats->cpuPID.c_str(),fp);
+    // char buffer [33];
+    CurTime* curT = new CurTime;
+    getTime(curT);
+    fprintf(fp, "TIME SENT<<%li:%li:%li - %li:%li:%li\n",
+                    stats->timeYEAR,
+                    stats->timeMONTH,
+                    stats->timeDAY,
+                    stats->timeHOUR,
+                    stats->timeMIN,
+                    stats->timeSEC);
+    fprintf(fp, "TIME RECEIVED<<%li:%li:%li - %li:%li:%li\n",
+                    curT->timeYEAR,
+                    curT->timeMONTH,
+                    curT->timeDAY,
+                    curT->timeHOUR,
+                    curT->timeMIN,
+                    curT->timeSEC);
+    fputs("\n",fp);
+    fputs(stats->memPID.c_str(),fp);
+    fputs(stats->cpuPID.c_str(),fp);
+
 }
 
-void getTime(Stats* stats){
+void getTime(CurTime* stats){
     time_t t = std::time(0);   // get time now
     struct tm * now = localtime( & t );
     stats->timeYEAR = (long)(now->tm_year + 1900);
