@@ -387,27 +387,38 @@ int main(int argc , char *argv[])
                         }
                         else{
                             *sizePID = *totalSize-(long)(sizeof(temp->asb)+
-                                                            sizeof(temp->fsb)+
-                                                            sizeof(temp->asp)+
-                                                            sizeof(temp->fsp)+
-                                                            sizeof(temp->mtb)+
-                                                            sizeof(temp->mab)+
-                                                            sizeof(temp->stb)+
-                                                            sizeof(temp->sab)+
-                                                            sizeof(temp->upt)+
-                                                            sizeof(temp->loadavg));
-                            char data[*totalSize];
+                                                         sizeof(temp->fsb)+
+                                                         sizeof(temp->asp)+
+                                                         sizeof(temp->fsp)+
+                                                         sizeof(temp->mtb)+
+                                                         sizeof(temp->mab)+
+                                                         sizeof(temp->stb)+
+                                                         sizeof(temp->sab)+
+                                                         sizeof(temp->upt)+
+                                                         sizeof(temp->loadavg));
 
-                            if((*numbytes = recv(childSocket, &data, *totalSize, 0)) == -1){
-                                perror("recv()");
-                                exit(1);
+                            char data[(*totalSize)];
+                            char *p = data;
+                            bool dataRECV = false;
+                            while((*numbytes = recv(childSocket, p, *totalSize, 0))>0){
+                                if(*numbytes == 0){
+                                    break;
+                                }
+                                *totalSize-=*numbytes;
+                                p += *numbytes;
+                                dataRECV = true;
+                            }
+                            if(dataRECV){
+                                dataRECV = false;
+                                deserialize(data, temp, sizePID);
+                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
+                                send(childSocket,putData,sizeof(putData),0);
                             }
                             else{
-                                deserialize(data, temp, sizePID);
-                                printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
-                                send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
+                                std::cout<<"--------------------RESEND---------------------"<<std::endl;
                             }
                             delete temp;
+                            // delete p;
                         }
                         delete numbytes;
                         delete totalSize;
@@ -422,93 +433,6 @@ int main(int argc , char *argv[])
         }
     }
     return 0;
-
-    // while(true){
-    //     if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
-    //         close(childSocket);
-    //         exit(-1);
-    //     }
-
-    //     else{
-    //      pid_t *new_fork = new pid_t;
-    //      std::cout<<"NEW FORK: "<<*new_fork<<std::endl;
-    //         switch(*new_fork = fork()){
-    //             case -1: // Error
-    //                 {
-    //                     perror("forking failed");
-    //                     close(parentSocket);
-    //                     close(childSocket);
-    //                     exit(-1);
-    //                 }
-    //             case 0: // Child
-    //                 {
-    //                     bool* connectionStatus = new bool;
-    //                     Stats* temp = new Stats;
-    //                     int* numbytes = new int;
-    //                     long* totalSize = new long;
-    //                     long* sizePID = new long;
-    //                     int* putData = new int;
-    //                     *putData = 1;
-
-    //                     std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
-
-    //                      *connectionStatus = true;
-    //                     char *client_ip = inet_ntoa(client.sin_addr);
-    //                     int client_port = ntohs(client.sin_port);
-
-    //                     printf("CONNECTED\n");
-
-    //                     while (*connectionStatus){
-    //                         close(parentSocket);
-
-    //                         if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
-    //                             perror("recv()");
-    //                             exit(1);
-    //                         }
-    //                         else{
-    //                             *sizePID = *totalSize-(long)(sizeof(temp->asb)+
-    //                                                             sizeof(temp->fsb)+
-    //                                                             sizeof(temp->asp)+
-    //                                                             sizeof(temp->fsp)+
-    //                                                             sizeof(temp->mtb)+
-    //                                                             sizeof(temp->mab)+
-    //                                                             sizeof(temp->stb)+
-    //                                                             sizeof(temp->sab)+
-    //                                                             sizeof(temp->upt)+
-    //                                                             sizeof(temp->loadavg));
-    //                             char data[*totalSize];
-
-    //                             if((*numbytes = recv(childSocket, &data, *totalSize, 0)) == -1){
-    //                                 perror("recv()");
-    //                                 exit(1);
-    //                             }
-    //                             else{
-    //                                 deserialize(data, temp, sizePID);
-
-    //                                 printf("MessageIn: \n\tasb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
-    //                                 send(childSocket,putData,sizeof(putData),MSG_CONFIRM);
-    //                                 *connectionStatus = false;
-    //                                 std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
-    //                             }
-    //                             delete temp;
-    //                         }
-    //                     }
-    //                     close(childSocket);
-    //                     delete connectionStatus;
-    //                     delete numbytes;
-    //                     delete totalSize;
-    //                     delete sizePID;
-    //                     delete putData;
-             //            delete new_fork;
-             //            std::cout<<temp<<" "<<numbytes<<" "<<sizePID<<" "<<putData<<" "<<new_fork<<std::endl;
-    //                 }
-    //             default:    // Parent
-    //                 close(childSocket);
-    //                 continue;
-    //         }
-    //     }
-    // }
-    // return 0;
 }
 
 void deserialize(char *data, Stats* msgPacket,long* stringSize)
@@ -531,29 +455,57 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
 
     char *p = (char*)w;
 
-    std::stringstream ssMEM;
-    std::string mem;
-    std::string buf;
+    std::stringstream ssTOP;
+    std::string bufMEM;
+    // std::cout<<"++++++++++++++++++++++++++++++++"<<std::endl;
     for(int i=0;i<*stringSize;i++){
-        ssMEM<<*p; p++;
+        // std::cout<<*p;
+        ssTOP<<*p; p++;
     }
-    std::vector<std::tuple <long,int,std::string,std::string>> test;
+    // std::cout<<"++++++++++++++++++++++++++++++++"<<std::endl;
+    ssTOP<<'\0';
+    ssTOP<<std::flush;
+    std::vector<std::tuple <long,int,std::string,std::string>> vecMEM;
 
     for(int i=0;i<10;i++){
-        ssMEM>>buf;
-        long t1 = std::stol(buf);
-        ssMEM>>buf;
-        int t2 = std::atoi(buf.c_str());
+        ssTOP>>bufMEM;
+        long t1 = std::stol(bufMEM);
+        ssTOP>>bufMEM;
+        int t2 = std::atoi(bufMEM.c_str());
         std::string t3;
-        ssMEM>>t3;
+        ssTOP>>t3;
         std::string t4;
-        ssMEM>>t4;
-        test.push_back(std::make_tuple(t1,t2,t3,t4));
+        ssTOP>>t4;
+        vecMEM.push_back(std::make_tuple(t1,t2,t3,t4));
     }
 
-    std::cout<<"==============================="<<std::endl;
+    std::cout<<"==============MEM================="<<std::endl;
     for(int i=0;i<10;i++){
-        std::cout<<std::get<0>(test[i])<<"\t"<<std::get<1>(test[i])<<"\t"<<std::get<2>(test[i])<<"\t"<<std::get<3>(test[i])<<std::endl;
+        std::cout<<std::get<0>(vecMEM[i])<<"\t"<<std::get<1>(vecMEM[i])<<"\t"<<std::get<2>(vecMEM[i])<<"\t"<<std::get<3>(vecMEM[i])<<std::endl;
     }
-    std::cout<<"==============================="<<std::endl;
+    std::cout<<"==============MEM================="<<std::endl;
+
+    char *r = (char*)p;
+
+    std::stringstream ssCPU;
+    std::string bufCPU;
+    std::vector<std::tuple <long,int,std::string,std::string>> vecCPU;
+
+    for(int i=0;i<10;i++){
+        ssTOP>>bufCPU;
+        long y1 = std::stol(bufCPU);
+        ssTOP>>bufCPU;
+        int y2 = std::atoi(bufCPU.c_str());
+        std::string y3;
+        ssTOP>>y3;
+        std::string y4;
+        ssTOP>>y4;
+        vecCPU.push_back(std::make_tuple(y1,y2,y3,y4));
+    }
+
+    std::cout<<"===============CPU================"<<std::endl;
+    for(int i=0;i<10;i++){
+        std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
+    }
+    std::cout<<"===============CPU================"<<std::endl;
 }

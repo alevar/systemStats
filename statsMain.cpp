@@ -272,76 +272,6 @@ typedef struct Stats {
     std::string cpuPID;
 } stats;
 
-void getDiskSpace(const char *path,Stats* stats){
-    struct statvfs buf;
-    struct stat fi;
-
-    int ret = statvfs("/",&buf);
-    unsigned long freeBlocks = buf.f_bfree;
-    stat("/",&fi);
-    stats->asb = buf.f_bavail*buf.f_bsize;
-    stats->fsb = buf.f_bfree*buf.f_bsize;
-    stats->asp = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
-    stats->fsp = 100.0 * (double)buf.f_bfree / (double)buf.f_blocks;
-}
-
-void getCPU(Stats* stats){
-    long double a[4], b[4];
-    FILE *fp;
-    char dump[50];
-
-    fp = fopen("/proc/stat","r");
-    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
-    fclose(fp);
-    sleep(1);
-
-    fp = fopen("/proc/stat","r");
-    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&b[0],&b[1],&b[2],&b[3]);
-    fclose(fp);
-
-    stats->loadavg = (long)(((b[0]+b[1]+b[2]) - (a[0]+a[1]+a[2])) / ((b[0]+b[1]+b[2]+b[3]) - (a[0]+a[1]+a[2]+a[3]))*100);
-}
-
-void getOther(Stats* stats){
-    struct sysinfo info;
-    sysinfo(&info);
-    stats->stb = info.totalswap;
-    stats->sab = info.freeswap;
-    stats->upt = info.uptime;
-}
-
-void getRAM(Stats* stats){
-    FILE* fp = fopen( "/proc/meminfo", "r" );
-    if ( fp != NULL )
-    {
-        size_t bufsize = 1024 * sizeof(char);
-        char* buf = (char*)malloc( bufsize );
-        long totalMem = -1L;
-        long freeMem = -1L;
-        long bufMem = -1L;
-        long cacheMem = -1L;
-        while ( getline( &buf, &bufsize, fp ) >= 0 )
-        {
-            if ( strncmp( buf, "MemTotal", 8 ) == 0 ){
-                sscanf( buf, "%*s%ld", &totalMem );
-            }
-            if ( strncmp( buf, "MemFree", 7 ) == 0 ){
-                sscanf( buf, "%*s%ld", &freeMem );
-            }
-            if ( strncmp( buf, "Buffers", 7 ) == 0 ){
-                sscanf( buf, "%*s%ld", &bufMem );
-            }
-            if ( strncmp( buf, "Cached", 6 ) == 0 ){
-                sscanf( buf, "%*s%ld", &cacheMem );
-            }
-
-        }
-        fclose(fp);
-        stats->mtb = (size_t)totalMem;
-        stats->mab = (size_t)(freeMem+cacheMem+bufMem);
-    }
-}
-
 /*
 This function will likely iterate over the /proc/<procID>/stat and /proc/<procID>statm data
 Sort the data by highest CPU and RAM consumption
@@ -349,223 +279,19 @@ and return top n processes
 
 Perhaps it will only be called if the system load is above a certain threshhold
 */
-
-bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tuple<long,int,std::string,std::string>& b){
-    return std::get<1>(a) > std::get<1>(b);
-}
-
-unsigned long getUID(std::string path){
-    FILE *fp;
-    unsigned long uid;
-    fp = fopen(path.c_str(),"r");
-    fscanf(fp,"%lu",&uid);
-    fclose(fp);
-    return uid;
-}
-
-void getCMD(std::string path,char* cmd){
-    FILE *fp;
-    fp = fopen(path.c_str(),"r");
-    fscanf(fp,"%s",cmd);
-    fclose(fp);
-}
-
-void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *procs) {
-    DIR* proc = opendir("/proc");
-    struct dirent* ent;
-    long tgid;
-
-    long double a[4];
-    FILE *fp;
-    char path[40];
-
-    while(ent = readdir(proc)) {
-        if(!isdigit(*ent->d_name))
-            continue;
-
-        tgid = strtol(ent->d_name, NULL, 10);
-
-        snprintf(path, 40, "/proc/%ld/statm", tgid);
-        fp = fopen(path,"r");
-        fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
-        fclose(fp);
-        struct passwd *pw;
-
-        snprintf(path, 40, "/proc/%ld/loginuid", tgid);
-        unsigned long uid = getUID(path);
-        if (uid != (unsigned int)-1){
-            snprintf(path, 40, "/proc/%ld/cmdline", tgid);
-            char comm[1000];
-            getCMD(path,comm);
-
-            pw = getpwuid((uid_t)uid);
-            procs->push_back(std::make_tuple(tgid,a[0],pw->pw_name,std::string(comm)));
-        }
-    }
-    closedir(proc);
-
-    sort(procs->begin(),procs->end(),comp);
-    procs->resize(10);
-}
-
-void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime){
-    DIR* proc = opendir("/proc");
-    int hertz = sysconf(_SC_CLK_TCK);
-    struct dirent* ent;
-    long tgid;
-
-    long double a[33];
-    FILE *fp;
-    char path[40];
-
-    while(ent = readdir(proc)) {
-        if(!isdigit(*ent->d_name))
-            continue;
-
-        tgid = strtol(ent->d_name, NULL, 10);
-        snprintf(path, 40, "/proc/%ld/stat", tgid);
-        fp = fopen(path,"r");
-        fscanf(fp,"%i %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
-                  /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
-        &(pinfo->pid),                     //1
-        &(pinfo->comm),                    //2
-        &(pinfo->state),                   //3
-        &(pinfo->ppid),                    //4
-        &(pinfo->pgrp),                    //5
-        &(pinfo->session),                 //6
-        &(pinfo->tty_nr),                  //7
-        &(pinfo->tpgid),                   //8
-        &(pinfo->flags),                   //9
-        &(pinfo->minflt),                  //10
-        &(pinfo->cminflt),                 //11
-        &(pinfo->majflt),                  //12
-        &(pinfo->cmajflt),                 //13
-        &(pinfo->utime),                   //14
-        &(pinfo->stime),                   //15
-        &(pinfo->cutime),                  //16
-        &(pinfo->cstime),                  //17
-        &(pinfo->priority),                //18
-        &(pinfo->nice),                    //19
-        &(pinfo->num_threads),             //20
-        &(pinfo->itrealvalue),             //21
-        &(pinfo->starttime),               //22
-        &(pinfo->vsize),                   //23
-        &(pinfo->rss),                     //24
-        &(pinfo->rsslim),                  //25
-        &(pinfo->startcode),               //26
-        &(pinfo->endcode),                 //27
-        &(pinfo->startstack),              //28
-        &(pinfo->kstkesp),                 //29
-        &(pinfo->kstkeip),                 //30
-        &(pinfo->signal),                  //31
-        &(pinfo->blocked),                 //32
-        &(pinfo->sigignore),               //33
-        &(pinfo->sigcatch),                //34
-        &(pinfo->wchan),                   //35
-        &(pinfo->nswap),                   //36
-        &(pinfo->cnswap),                  //37
-        &(pinfo->exit_signal),             //38
-        &(pinfo->processor),               //39
-        &(pinfo->rt_priority),             //40
-        &(pinfo->policy),                  //41
-        &(pinfo->delayacct_blkio_ticks),   //42
-        &(pinfo->guest_time),              //43
-        &(pinfo->cguest_time),             //44
-        &(pinfo->start_data),              //45
-        &(pinfo->end_data),                //46
-        &(pinfo->start_brk),               //47
-        &(pinfo->arg_start),               //48
-        &(pinfo->arg_end),                 //49
-        &(pinfo->env_start),               //50
-        &(pinfo->env_end),                 //51
-        &(pinfo->exit_code)                //52
-        );
-        fclose(fp);
-        unsigned long totalTime = pinfo->utime+pinfo->stime;
-        float seconds = (float)uptime-((float)pinfo->starttime/(float)hertz);
-        float cpu_usage = 100*(((float)totalTime/(float)hertz)/seconds);
-
-        struct passwd *pw;
-
-        snprintf(path, 40, "/proc/%ld/loginuid", tgid);
-        unsigned long uid = getUID(path);
-        if (uid != (unsigned int)-1){
-            pw = getpwuid((uid_t)uid);
-
-            snprintf(path, 40, "/proc/%ld/cmdline", tgid);
-            char comm[1000];
-            getCMD(path,comm);
-
-            procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name,std::string(comm)));
-        }
-    }
-    closedir(proc);
-    sort(procs->begin(),procs->end(),comp);
-    procs->resize(10);
-}
-
+void getDiskSpace(const char *path,Stats* stats);
+void getCPU(Stats* stats);
+void getOther(Stats* stats);
+void getRAM(Stats* stats);
+bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tuple<long,int,std::string,std::string>& b);
+unsigned long getUID(std::string path);
+void getCMD(std::string path,char* cmd);
+void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *procs);
+void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime);
 template <class T>
-void stringify(std::vector<T>* v,Stats* stats){
-    std::stringstream ss;
-    for(size_t i = 0; i < v->size(); i++){
-        ss<<std::get<0>(v->at(i));
-        ss << "\t";
-        ss<<std::get<1>(v->at(i));
-        ss << "\t";
-        ss<<std::get<2>(v->at(i));
-        ss << "\t";
-        ss<<std::get<3>(v->at(i));
-        ss << "\n";
-    }
-    ss << "\v";
-    stats->memPID = ss.str();
-}
-
-void buildStats(Stats* stats){
-    getDiskSpace("/",stats);
-    getCPU(stats);
-    getRAM(stats);
-    getOther(stats);
-
-    std::vector<std::tuple <long,int,std::string,std::string>> procMem;
-    parseStatm(&procMem);
-    stringify(&procMem,stats);
-
-    procinfo pinfo;
-    std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
-    parseStat(&pinfo,&procCPU,stats->upt);
-    stringify(&procCPU,stats);
-    std::cout<<stats->memPID<<std::endl;
-}
-
-void serialize(Stats* msgPacket, char *data, long stringSize){
-    long *e = (long*)data;
-    *e = stringSize;           e++;
-
-    unsigned long *q = (unsigned long*)e;    
-    *q = msgPacket->asb;       q++;    
-    *q = msgPacket->fsb;       q++;    
-    *q = msgPacket->asp;       q++;
-    *q = msgPacket->fsp;       q++;
-
-    *q = msgPacket->mtb;       q++;
-    *q = msgPacket->mab;       q++;
-
-    *q = msgPacket->stb;       q++;
-    *q = msgPacket->sab;       q++;
-
-    long *w = (long*)q;
-    *w = msgPacket->upt;       w++;
-    *w = msgPacket->loadavg;   w++;
-
-    char *p = (char*)w;
-    for(int i=0;i<msgPacket->memPID.size();i++){
-        *p = msgPacket->memPID.c_str()[i];  p++;
-    }
-    for(int i=0;i<msgPacket->cpuPID.size();i++){
-        *p = msgPacket->cpuPID.c_str()[i];  p++;
-    }
-}
+void stringify(std::vector<T>* v,std::string* stats);
+void buildStats(Stats* stats);
+void serialize(Stats* msgPacket, char *data, long stringSize);
 
 int main(int argc , char *argv[]){
 
@@ -574,10 +300,12 @@ int main(int argc , char *argv[]){
     int destinationPort;
     int updateSec;
     char * destinationAddress;
+    int this_option_optind;
+    int option_index;
 
     while (1) {
-        int this_option_optind = optind ? optind : 1;
-        int option_index = 0;
+        this_option_optind = optind ? optind : 1;
+        option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
             {"addr",     required_argument, 0,  0 },
@@ -625,23 +353,19 @@ int main(int argc , char *argv[]){
 
     int socket_desc;
     struct sockaddr_in server;
-    int numbytes;
     int closeCall;
-
     bool waitRecv;
-    bool log = true;
-
     Stats stats;
     int totalSize;
     long stringSize;
 
-    while(log){
+    while(true){
   
         buildStats(&stats);
 
         socket_desc = socket(AF_INET , SOCK_STREAM , 0);
         if (socket_desc == -1){
-            std::cout << "COULD NOT CREATE SOCKET" << std::endl;
+            printf("COULD NOT CREATE SOCKET\n");
         }
              
         server.sin_addr.s_addr = inet_addr(destinationAddress);
@@ -651,7 +375,7 @@ int main(int argc , char *argv[]){
         printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
 
         if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
-            std::cout << "CONNECT ERROR" << std::endl;
+            printf("CONNECT ERROR\n");
             return 1;
         }
 
@@ -671,25 +395,337 @@ int main(int argc , char *argv[]){
 
         char data1[totalSize];
         serialize(&stats, data1,(long)totalSize);
-        char *q = (char*)data1;
+        char *p = data1;
+        int* numbytes = new int;
 
-        send(socket_desc,data1,sizeof(data1),0);
+        while((*numbytes=send(socket_desc,p,sizeof(data1),MSG_CONFIRM))>0){
+            p+=*numbytes;
+        }
 
         waitRecv= true;
         while(waitRecv){
-            if((numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
+            if((*numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
                 perror("recv()");
                 exit(1);
             }
             else{
                 waitRecv = false;
-                std::cout << closeCall << std::endl;
                 if(closeCall==1){
                     close(socket_desc);
                 }
             }
         }
+        delete numbytes;
         sleep(updateSec);
     }
     return 0;
+}
+
+void serialize(Stats* msgPacket, char *data, long stringSize){
+    long *e = (long*)data;
+    *e = stringSize;           e++;
+
+    unsigned long *q = (unsigned long*)e;    
+    *q = msgPacket->asb;       q++;    
+    *q = msgPacket->fsb;       q++;    
+    *q = msgPacket->asp;       q++;
+    *q = msgPacket->fsp;       q++;
+
+    *q = msgPacket->mtb;       q++;
+    *q = msgPacket->mab;       q++;
+
+    *q = msgPacket->stb;       q++;
+    *q = msgPacket->sab;       q++;
+
+    long *w = (long*)q;
+    *w = msgPacket->upt;       w++;
+    *w = msgPacket->loadavg;   w++;
+
+    char *p = (char*)w;
+    for(int i=0;i<msgPacket->memPID.size();i++){
+        *p = msgPacket->memPID.c_str()[i];  p++;
+    }
+    // std::cout<<"===================================="<<std::endl;
+    std::stringstream ssTOP;
+    for(int i=0;i<msgPacket->cpuPID.size();i++){
+        *p = msgPacket->cpuPID.c_str()[i]; 
+        ssTOP<<*p; p++;
+        // std::cout<<msgPacket->cpuPID.c_str()[i];
+    }
+    // std::string buf;
+    // while(ssTOP>>buf){
+    //     std::cout<<buf;
+    // }
+    // std::cout<<std::endl<<ssTOP.rdbuf();
+    // std::cout<<std::endl<<ssTOP.str();
+    // std::cout<<std::endl<<"===================================="<<std::endl;
+}
+
+void buildStats(Stats* stats){
+    getDiskSpace("/",stats);
+    getCPU(stats);
+    getRAM(stats);
+    getOther(stats);
+
+    std::vector<std::tuple <long,int,std::string,std::string>> procMem;
+    parseStatm(&procMem);
+    stringify(&procMem,&(stats->memPID));
+
+    procinfo pinfo;
+    std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
+    parseStat(&pinfo,&procCPU,stats->upt);
+    stringify(&procCPU,&(stats->cpuPID));
+    std::cout<<"PID\tMEM(B)\tUSER\tCOMM"<<std::endl;
+    std::cout<<stats->memPID<<std::endl;
+    std::cout<<"PID\tCPU(\%)\tUSER\tCOMM"<<std::endl;
+    std::cout<<stats->cpuPID<<std::endl;
+}
+
+template <class T>
+void stringify(std::vector<T>* v,std::string* stats){
+    std::stringstream ss;
+    for(size_t i=0;i<v->size();i++){
+        ss<<std::get<0>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<1>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<2>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<3>(v->at(i));
+        ss<<"\n";
+    }
+    ss<<"\r";
+    *stats = ss.str();
+}
+
+void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime){
+    DIR* proc = opendir("/proc");
+    int hertz = sysconf(_SC_CLK_TCK);
+    struct dirent* ent;
+    long tgid;
+
+    long double a[33];
+    FILE *fp;
+    char path[40];
+
+    while(ent = readdir(proc)) {
+        if(!isdigit(*ent->d_name))
+            continue;
+
+        tgid = strtol(ent->d_name, NULL, 10);
+        snprintf(path, 40, "/proc/%ld/stat", tgid);
+        if(fp = fopen(path,"r")){
+            fscanf(fp,"%i %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
+                      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
+            &(pinfo->pid),                     //1
+            &(pinfo->comm),                    //2
+            &(pinfo->state),                   //3
+            &(pinfo->ppid),                    //4
+            &(pinfo->pgrp),                    //5
+            &(pinfo->session),                 //6
+            &(pinfo->tty_nr),                  //7
+            &(pinfo->tpgid),                   //8
+            &(pinfo->flags),                   //9
+            &(pinfo->minflt),                  //10
+            &(pinfo->cminflt),                 //11
+            &(pinfo->majflt),                  //12
+            &(pinfo->cmajflt),                 //13
+            &(pinfo->utime),                   //14
+            &(pinfo->stime),                   //15
+            &(pinfo->cutime),                  //16
+            &(pinfo->cstime),                  //17
+            &(pinfo->priority),                //18
+            &(pinfo->nice),                    //19
+            &(pinfo->num_threads),             //20
+            &(pinfo->itrealvalue),             //21
+            &(pinfo->starttime),               //22
+            &(pinfo->vsize),                   //23
+            &(pinfo->rss),                     //24
+            &(pinfo->rsslim),                  //25
+            &(pinfo->startcode),               //26
+            &(pinfo->endcode),                 //27
+            &(pinfo->startstack),              //28
+            &(pinfo->kstkesp),                 //29
+            &(pinfo->kstkeip),                 //30
+            &(pinfo->signal),                  //31
+            &(pinfo->blocked),                 //32
+            &(pinfo->sigignore),               //33
+            &(pinfo->sigcatch),                //34
+            &(pinfo->wchan),                   //35
+            &(pinfo->nswap),                   //36
+            &(pinfo->cnswap),                  //37
+            &(pinfo->exit_signal),             //38
+            &(pinfo->processor),               //39
+            &(pinfo->rt_priority),             //40
+            &(pinfo->policy),                  //41
+            &(pinfo->delayacct_blkio_ticks),   //42
+            &(pinfo->guest_time),              //43
+            &(pinfo->cguest_time),             //44
+            &(pinfo->start_data),              //45
+            &(pinfo->end_data),                //46
+            &(pinfo->start_brk),               //47
+            &(pinfo->arg_start),               //48
+            &(pinfo->arg_end),                 //49
+            &(pinfo->env_start),               //50
+            &(pinfo->env_end),                 //51
+            &(pinfo->exit_code)                //52
+            );
+            fclose(fp);
+            unsigned long totalTime = pinfo->utime+pinfo->stime;
+            float seconds = (float)uptime-((float)pinfo->starttime/(float)hertz);
+            float cpu_usage = 100*(((float)totalTime/(float)hertz)/seconds);
+
+            struct passwd *pw;
+
+            snprintf(path, 40, "/proc/%ld/loginuid", tgid);
+            unsigned long uid = getUID(path);
+            if (uid != (unsigned int)-1){
+                pw = getpwuid((uid_t)uid);
+
+                snprintf(path, 40, "/proc/%ld/cmdline", tgid);
+                char comm[1000];
+                getCMD(path,comm);
+                std::string test(comm);
+
+                procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name,test));
+            }
+        }
+    }
+    closedir(proc);
+    if(procs->size()!=0){
+        sort(procs->begin(),procs->end(),comp);
+        procs->resize(10);
+    }
+}
+
+void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *procs) {
+    DIR* proc = opendir("/proc");
+    struct dirent* ent;
+    long tgid;
+
+    long double a[4];
+    FILE *fp;
+    char path[40];
+
+    while(ent = readdir(proc)) {
+        if(!isdigit(*ent->d_name))
+            continue;
+
+        tgid = strtol(ent->d_name, NULL, 10);
+
+        snprintf(path, 40, "/proc/%ld/statm", tgid);
+        if(fp = fopen(path,"r")){
+            fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
+            fclose(fp);
+            struct passwd *pw;
+
+            snprintf(path, 40, "/proc/%ld/loginuid", tgid);
+            unsigned long uid = getUID(path);
+            if (uid != (unsigned int)-1){
+                snprintf(path, 40, "/proc/%ld/cmdline", tgid);
+                char comm[1000];
+                getCMD(path,comm);
+
+                pw = getpwuid((uid_t)uid);
+                procs->push_back(std::make_tuple(tgid,a[0],pw->pw_name,std::string(comm)));
+            }
+        }
+    }
+    closedir(proc);
+
+    if(procs->size()!=0){
+        sort(procs->begin(),procs->end(),comp);
+        procs->resize(10);
+    }
+}
+
+void getCMD(std::string path,char* cmd){
+    FILE *fp;
+    fp = fopen(path.c_str(),"r");
+    fscanf(fp,"%s",cmd);
+    fclose(fp);
+}
+
+unsigned long getUID(std::string path){
+    FILE *fp;
+    unsigned long uid;
+    fp = fopen(path.c_str(),"r");
+    fscanf(fp,"%lu",&uid);
+    fclose(fp);
+    return uid;
+}
+
+bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tuple<long,int,std::string,std::string>& b){
+    return std::get<1>(a) > std::get<1>(b);
+}
+
+void getDiskSpace(const char *path,Stats* stats){
+    struct statvfs buf;
+    struct stat fi;
+
+    int ret = statvfs("/",&buf);
+    unsigned long freeBlocks = buf.f_bfree;
+    stat("/",&fi);
+    stats->asb = buf.f_bavail*buf.f_bsize;
+    stats->fsb = buf.f_bfree*buf.f_bsize;
+    stats->asp = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
+    stats->fsp = 100.0 * (double)buf.f_bfree / (double)buf.f_blocks;
+}
+
+void getCPU(Stats* stats){
+    long double a[4], b[4];
+    FILE *fp;
+    char dump[50];
+
+    fp = fopen("/proc/stat","r");
+    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
+    fclose(fp);
+    sleep(1);
+
+    fp = fopen("/proc/stat","r");
+    fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&b[0],&b[1],&b[2],&b[3]);
+    fclose(fp);
+
+    stats->loadavg = (long)(((b[0]+b[1]+b[2])-(a[0]+a[1]+a[2]))/((b[0]+b[1]+b[2]+b[3])-(a[0]+a[1]+a[2]+a[3]))*100);
+}
+
+void getOther(Stats* stats){
+    struct sysinfo info;
+    sysinfo(&info);
+    stats->stb = info.totalswap;
+    stats->sab = info.freeswap;
+    stats->upt = info.uptime;
+}
+
+void getRAM(Stats* stats){
+    FILE* fp = fopen( "/proc/meminfo", "r" );
+    if ( fp != NULL )
+    {
+        size_t bufsize = 1024 * sizeof(char);
+        char* buf = (char*)malloc( bufsize );
+        long totalMem = -1L;
+        long freeMem = -1L;
+        long bufMem = -1L;
+        long cacheMem = -1L;
+        while ( getline( &buf, &bufsize, fp ) >= 0 )
+        {
+            if ( strncmp( buf, "MemTotal", 8 ) == 0 ){
+                sscanf( buf, "%*s%ld", &totalMem );
+            }
+            if ( strncmp( buf, "MemFree", 7 ) == 0 ){
+                sscanf( buf, "%*s%ld", &freeMem );
+            }
+            if ( strncmp( buf, "Buffers", 7 ) == 0 ){
+                sscanf( buf, "%*s%ld", &bufMem );
+            }
+            if ( strncmp( buf, "Cached", 6 ) == 0 ){
+                sscanf( buf, "%*s%ld", &cacheMem );
+            }
+
+        }
+        fclose(fp);
+        stats->mtb = (size_t)totalMem;
+        stats->mab = (size_t)(freeMem+cacheMem+bufMem);
+        free(buf);
+    }
 }
