@@ -22,6 +22,7 @@
 #include <tuple>
 #include <bitset>
 #include <sstream>
+#include <ctime>
 
 #define BACKLOG 1           // Number of connections to queue
 
@@ -265,6 +266,12 @@ typedef struct OTHER {
 } other;
 
 typedef struct Stats {
+    long timeYEAR;
+    long timeMONTH;
+    long timeDAY;
+    long timeHOUR;
+    long timeMIN;
+    long timeSEC;
     unsigned long asb; //available space in bytes
     unsigned long fsb; //free space in bytes
     unsigned long asp; //available space in percent
@@ -280,7 +287,12 @@ typedef struct Stats {
     std::string cpuPID;
 } stats;
 
+template <class T>
+void stringify(std::vector<T>* v,std::string* stats);
 void deserialize(char *data, Stats* msgPacket,long* stringSize);
+void log(Stats*,FILE*);
+void getTime(Stats*);
+void delay(Stats*);
 
 int main(int argc , char *argv[])
 {
@@ -380,13 +392,21 @@ int main(int argc , char *argv[])
 
                         char *client_ip = inet_ntoa(client.sin_addr);
                         int client_port = ntohs(client.sin_port);
+                        FILE* fp = new FILE;
+                        fp = fopen(client_ip,"a");
 
                         if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
                             perror("recv()");
                             exit(1);
                         }
                         else{
-                            *sizePID = *totalSize-(long)(sizeof(temp->asb)+
+                            *sizePID = *totalSize-(long)(sizeof(temp->timeYEAR)+
+                                                         sizeof(temp->timeMONTH)+
+                                                         sizeof(temp->timeDAY)+
+                                                         sizeof(temp->timeHOUR)+
+                                                         sizeof(temp->timeMIN)+
+                                                         sizeof(temp->timeSEC)+
+                                                         sizeof(temp->asb)+
                                                          sizeof(temp->fsb)+
                                                          sizeof(temp->asp)+
                                                          sizeof(temp->fsp)+
@@ -411,8 +431,25 @@ int main(int argc , char *argv[])
                             if(dataRECV){
                                 dataRECV = false;
                                 deserialize(data, temp, sizePID);
-                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n",temp->asb,temp->fsb,temp->asp,temp->fsp,temp->upt,(float)temp->loadavg/100.0);
+                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+                                        temp->asb,
+                                        temp->fsb,
+                                        temp->asp,
+                                        temp->fsp,
+                                        temp->upt,
+                                        temp->mtb,
+                                        temp->mab,
+                                        temp->stb,
+                                        temp->sab,
+                                        (float)temp->loadavg/100.0),
+                                        temp->timeYEAR,
+                                        temp->timeMONTH,
+                                        temp->timeDAY,
+                                        temp->timeHOUR,
+                                        temp->timeMIN,
+                                        temp->timeSEC;
                                 send(childSocket,putData,sizeof(putData),0);
+                                log(temp,fp);
                             }
                             else{
                                 std::cout<<"--------------------RESEND---------------------"<<std::endl;
@@ -420,6 +457,7 @@ int main(int argc , char *argv[])
                             delete temp;
                             // delete p;
                         }
+                        fclose(fp);
                         delete numbytes;
                         delete totalSize;
                         delete sizePID;
@@ -435,9 +473,34 @@ int main(int argc , char *argv[])
     return 0;
 }
 
+template <class T>
+void stringify(std::vector<T>* v,std::string* stats){
+    std::stringstream ss;
+    for(size_t i=0;i<v->size();i++){
+        ss<<std::get<0>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<1>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<2>(v->at(i));
+        ss<<"\t";
+        ss<<std::get<3>(v->at(i));
+        ss<<"\n";
+    }
+    ss<<"\r";
+    *stats = ss.str();
+}
+
 void deserialize(char *data, Stats* msgPacket,long* stringSize)
 {
-    unsigned long *q = (unsigned long*)data;    
+    long *e = (long*)data;
+    msgPacket->timeYEAR =  *e;  e++;
+    msgPacket->timeMONTH = *e;  e++;
+    msgPacket->timeDAY =   *e;  e++;
+    msgPacket->timeHOUR =  *e;  e++;
+    msgPacket->timeMIN =   *e;  e++;
+    msgPacket->timeSEC =   *e;  e++;
+
+    unsigned long *q = (unsigned long*)e;    
     msgPacket->asb = *q;     q++;    
     msgPacket->asp = *q;     q++;    
     msgPacket->fsb = *q;     q++;
@@ -478,6 +541,7 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         ssTOP>>t4;
         vecMEM.push_back(std::make_tuple(t1,t2,t3,t4));
     }
+    stringify(&vecMEM,&(msgPacket->memPID));
 
     std::cout<<"==============MEM================="<<std::endl;
     for(int i=0;i<10;i++){
@@ -502,10 +566,33 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         ssTOP>>y4;
         vecCPU.push_back(std::make_tuple(y1,y2,y3,y4));
     }
+    stringify(&vecCPU,&(msgPacket->cpuPID));
 
     std::cout<<"===============CPU================"<<std::endl;
     for(int i=0;i<10;i++){
         std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
     }
     std::cout<<"===============CPU================"<<std::endl;
+}
+
+void log(Stats* stats,FILE* fp){
+    //send time
+    //received time
+    fputs (stats->memPID.c_str(),fp);
+    fputs (stats->cpuPID.c_str(),fp);
+}
+
+void getTime(Stats* stats){
+    time_t t = std::time(0);   // get time now
+    struct tm * now = localtime( & t );
+    stats->timeYEAR = (long)(now->tm_year + 1900);
+    stats->timeMONTH = (long)(now->tm_mon + 1);
+    stats->timeDAY = (long)(now->tm_mday);
+    stats->timeHOUR = (long)(now->tm_hour);
+    stats->timeMIN = (long)(now->tm_min);
+    stats->timeSEC = (long)(now->tm_sec);
+}
+
+void delay(Stats* stats){
+    std::cout<<"Calculate time delay between package sent (from stats) and current time"<<std::endl;
 }

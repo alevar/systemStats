@@ -21,6 +21,7 @@
 #include <pwd.h>
 #include <tuple>
 #include <time.h>
+#include <ctime>
 #include <bitset>
 #include <sstream>
 #include <unistd.h>
@@ -254,6 +255,12 @@ typedef struct procSTAT {
 } procinfo;
 
 typedef struct Stats {
+    long timeYEAR;
+    long timeMONTH;
+    long timeDAY;
+    long timeHOUR;
+    long timeMIN;
+    long timeSEC;
     unsigned long asb; //available space in bytes
     unsigned long fsb; //free space in bytes
     unsigned long asp; //available space in percent
@@ -279,19 +286,20 @@ and return top n processes
 
 Perhaps it will only be called if the system load is above a certain threshhold
 */
-void getDiskSpace(const char *path,Stats* stats);
-void getCPU(Stats* stats);
-void getOther(Stats* stats);
-void getRAM(Stats* stats);
-bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tuple<long,int,std::string,std::string>& b);
-unsigned long getUID(std::string path);
-void getCMD(std::string path,char* cmd);
-void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *procs);
-void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime);
+void getDiskSpace(const char*,Stats*);
+void getCPU(Stats*);
+void getOther(Stats*);
+void getRAM(Stats*);
+bool comp(const std::tuple<long,int,std::string,std::string>&, const std::tuple<long,int,std::string,std::string>&);
+unsigned long getUID(std::string);
+void getCMD(std::string,char*);
+void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>>*);
+void parseStat(procinfo*,std::vector<std::tuple <long,float,std::string,std::string>>*,long);
 template <class T>
-void stringify(std::vector<T>* v,std::string* stats);
-void buildStats(Stats* stats);
-void serialize(Stats* msgPacket, char *data, long stringSize);
+void stringify(std::vector<T>*,std::string*);
+void buildStats(Stats*);
+void serialize(Stats*, char*, long);
+void getTime(Stats*);
 
 int main(int argc , char *argv[]){
 
@@ -371,8 +379,23 @@ int main(int argc , char *argv[]){
         server.sin_addr.s_addr = inet_addr(destinationAddress);
         server.sin_family = AF_INET;
         server.sin_port = htons( destinationPort );
-
-        printf("MessageOut: asb>%lu \n\tfsb>%lu \n\tasp>%lu \n\tfsp>%lu \n\tupt>%li \n\tloadavg>%f\n",stats.asb,stats.fsb,stats.asp,stats.fsp,stats.upt,(float)stats.loadavg/100.0);
+        printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+                                        stats.asb,
+                                        stats.fsb,
+                                        stats.asp,
+                                        stats.fsp,
+                                        stats.upt,
+                                        stats.mtb,
+                                        stats.mab,
+                                        stats.stb,
+                                        stats.sab,
+                                        (float)stats.loadavg/100.0),
+                                        stats.timeYEAR,
+                                        stats.timeMONTH,
+                                        stats.timeDAY,
+                                        stats.timeHOUR,
+                                        stats.timeMIN,
+                                        stats.timeSEC;
 
         if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
             printf("CONNECT ERROR\n");
@@ -381,7 +404,13 @@ int main(int argc , char *argv[]){
 
         stringSize = stats.memPID.size()+
                     stats.cpuPID.size();
-        totalSize = sizeof(stats.asb)+
+        totalSize = sizeof(stats.timeYEAR)+
+                    sizeof(stats.timeMONTH)+
+                    sizeof(stats.timeDAY)+
+                    sizeof(stats.timeHOUR)+
+                    sizeof(stats.timeMIN)+
+                    sizeof(stats.timeSEC)+
+                    sizeof(stats.asb)+
                     sizeof(stats.fsb)+
                     sizeof(stats.asp)+
                     sizeof(stats.fsp)+
@@ -425,7 +454,14 @@ void serialize(Stats* msgPacket, char *data, long stringSize){
     long *e = (long*)data;
     *e = stringSize;           e++;
 
-    unsigned long *q = (unsigned long*)e;    
+    *e = msgPacket->timeYEAR;  e++;
+    *e = msgPacket->timeMONTH; e++;
+    *e = msgPacket->timeDAY;   e++;
+    *e = msgPacket->timeHOUR;  e++;
+    *e = msgPacket->timeMIN;   e++;
+    *e = msgPacket->timeSEC;   e++;
+
+    unsigned long *q = (unsigned long*)e;
     *q = msgPacket->asb;       q++;    
     *q = msgPacket->fsb;       q++;    
     *q = msgPacket->asp;       q++;
@@ -462,6 +498,7 @@ void serialize(Stats* msgPacket, char *data, long stringSize){
 }
 
 void buildStats(Stats* stats){
+    getTime(stats);
     getDiskSpace("/",stats);
     getCPU(stats);
     getRAM(stats);
@@ -728,4 +765,15 @@ void getRAM(Stats* stats){
         stats->mab = (size_t)(freeMem+cacheMem+bufMem);
         free(buf);
     }
+}
+
+void getTime(Stats* stats){
+    time_t t = std::time(0);   // get time now
+    struct tm * now = localtime( & t );
+    stats->timeYEAR = (long)(now->tm_year + 1900);
+    stats->timeMONTH = (long)(now->tm_mon + 1);
+    stats->timeDAY = (long)(now->tm_mday);
+    stats->timeHOUR = (long)(now->tm_hour);
+    stats->timeMIN = (long)(now->tm_min);
+    stats->timeSEC = (long)(now->tm_sec);
 }
