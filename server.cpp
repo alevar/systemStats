@@ -585,29 +585,38 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
 }
 
 void log(Stats* stats,FILE* fp){
-    //send time
-    //received time
-    // char buffer [33];
     CurTime* curT = new CurTime;
     getTime(curT);
-    fprintf(fp, "TIME SENT<<%li:%li:%li - %li:%li:%li\n",
+    fprintf(fp, "<<TIME SENT> %li:%li:%li - %li:%li:%li\n",
                     stats->timeYEAR,
                     stats->timeMONTH,
                     stats->timeDAY,
                     stats->timeHOUR,
                     stats->timeMIN,
                     stats->timeSEC);
-    fprintf(fp, "TIME RECEIVED<<%li:%li:%li - %li:%li:%li\n",
+    fprintf(fp, "TIME RECEIVED> %li:%li:%li - %li:%li:%li\n",
                     curT->timeYEAR,
                     curT->timeMONTH,
                     curT->timeDAY,
                     curT->timeHOUR,
                     curT->timeMIN,
                     curT->timeSEC);
-    fputs("\n",fp);
+    // fputs("\n",fp);
+    fprintf(fp, "Available Space(Bytes)>%lu\nFree Space(Bytes)>%lu\nAvailable Space(\%)>%lu\nFree Space(\%)>%lu\nUptime(seconds)>%li\nLoad>%f\nTotal Memory(Bytes)>%lu\nAvailable Memory(Bytes)>%lu\nTotal Swap(Bytes)>%lu\nAvailable Swap(Bytes)>%lu\n",
+                    stats->asb,
+                    stats->fsb,
+                    stats->asp,
+                    stats->fsp,
+                    stats->upt,
+                    stats->mtb,
+                    stats->mab,
+                    stats->stb,
+                    stats->sab,
+                    (float)stats->loadavg/100.0);
+    fputs("PID\tMEM(B)\tUSER\tCOMMAND\n",fp);
     fputs(stats->memPID.c_str(),fp);
+    fputs("PID\tCPU(\%)\tUSER\tCOMMAND\n",fp);
     fputs(stats->cpuPID.c_str(),fp);
-
 }
 
 void getTime(CurTime* stats){
