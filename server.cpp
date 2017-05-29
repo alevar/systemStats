@@ -23,6 +23,7 @@
 #include <bitset>
 #include <sstream>
 #include <ctime>
+#include <zlib.h>
 
 #define BACKLOG 1           // Number of connections to queue
 
@@ -307,13 +308,11 @@ int main(int argc , char *argv[])
 {
     int c;
     int serverPort;
-    int this_option_optind;
     int option_index;
     int parentSocket, childSocket, addrlen;
     struct sockaddr_in server, client;
 
     while (1) {
-        this_option_optind = optind ? optind : 1;
         option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
@@ -400,7 +399,6 @@ int main(int argc , char *argv[])
                         *putData = 1;
 
                         char *client_ip = inet_ntoa(client.sin_addr);
-                        int client_port = ntohs(client.sin_port);
                         FILE* fp = new FILE;
                         fp = fopen(client_ip,"a");
 
@@ -440,7 +438,7 @@ int main(int argc , char *argv[])
                             if(dataRECV){
                                 dataRECV = false;
                                 deserialize(data, temp, sizePID);
-                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
                                         temp->asb,
                                         temp->fsb,
                                         temp->asp,
@@ -450,13 +448,13 @@ int main(int argc , char *argv[])
                                         temp->mab,
                                         temp->stb,
                                         temp->sab,
-                                        (float)temp->loadavg/100.0),
+                                        (float)(temp->loadavg/100.0),
                                         temp->timeYEAR,
                                         temp->timeMONTH,
                                         temp->timeDAY,
                                         temp->timeHOUR,
                                         temp->timeMIN,
-                                        temp->timeSEC;
+                                        temp->timeSEC);
                                 send(childSocket,putData,sizeof(putData),0);
                                 log(temp,fp);
                             }
@@ -558,8 +556,6 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
     }
     std::cout<<"==============MEM================="<<std::endl;
 
-    char *r = (char*)p;
-
     std::stringstream ssCPU;
     std::string bufCPU;
     std::vector<std::tuple <long,int,std::string,std::string>> vecCPU;
@@ -602,7 +598,7 @@ void log(Stats* stats,FILE* fp){
                     curT->timeMIN,
                     curT->timeSEC);
     // fputs("\n",fp);
-    fprintf(fp, "Available Space(Bytes)>%lu\nFree Space(Bytes)>%lu\nAvailable Space(\%)>%lu\nFree Space(\%)>%lu\nUptime(seconds)>%li\nLoad>%f\nTotal Memory(Bytes)>%lu\nAvailable Memory(Bytes)>%lu\nTotal Swap(Bytes)>%lu\nAvailable Swap(Bytes)>%lu\n",
+    fprintf(fp, "Available Space(Bytes)>%lu\nFree Space(Bytes)>%lu\nAvailable Space(%%)>%lu\nFree Space(%%)>%lu\nUptime(seconds)>%li\nTotal Memory(Bytes)>%lu\nAvailable Memory(Bytes)>%lu\nTotal Swap(Bytes)>%lu\nAvailable Swap(Bytes)>%lu\nAverage Load>%.2f\n",
                     stats->asb,
                     stats->fsb,
                     stats->asp,
@@ -612,11 +608,12 @@ void log(Stats* stats,FILE* fp){
                     stats->mab,
                     stats->stb,
                     stats->sab,
-                    (float)stats->loadavg/100.0);
+                    (float)(stats->loadavg/100.0));
     fputs("PID\tMEM(B)\tUSER\tCOMMAND\n",fp);
     fputs(stats->memPID.c_str(),fp);
     fputs("PID\tCPU(\%)\tUSER\tCOMMAND\n",fp);
     fputs(stats->cpuPID.c_str(),fp);
+    delete curT;
 }
 
 void getTime(CurTime* stats){
