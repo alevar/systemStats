@@ -302,7 +302,6 @@ void serialize(Stats*, char*, long);
 void getTime(Stats*);
 
 int main(int argc , char *argv[]){
-
     int c;
     int serverPort;
     int destinationPort;
@@ -310,6 +309,14 @@ int main(int argc , char *argv[]){
     char * destinationAddress;
     int this_option_optind;
     int option_index;
+    struct hostent *he;
+    struct sockaddr_in server;
+    int socket_desc;
+    int closeCall;
+    bool waitRecv;
+    Stats stats;
+    int totalSize;
+    long stringSize;
 
     while (1) {
         this_option_optind = optind ? optind : 1;
@@ -334,7 +341,18 @@ int main(int argc , char *argv[]){
                         printf("PORT SET TO: %s\n", optarg );
                     }
                     if (long_options[option_index].name == "addr"){
-                        destinationAddress = optarg;
+                        if ((he = gethostbyname(optarg)) != NULL){
+                            struct in_addr **addr_list = (in_addr **)he->h_addr_list;
+                            char ip[100];
+                            strcpy(ip, inet_ntoa(*addr_list[0]));
+                            destinationAddress = ip;
+                        }
+                        else if((he = gethostbyname(optarg)) == NULL){
+                            exit(1);
+                        }
+                        else{
+                            destinationAddress = optarg;
+                        }
                         printf("ADDR SET TO: %s\n", destinationAddress);
                     }
                     if (long_options[option_index].name == "sec"){
@@ -359,14 +377,6 @@ int main(int argc , char *argv[]){
         printf("\n");
     }
 
-    int socket_desc;
-    struct sockaddr_in server;
-    int closeCall;
-    bool waitRecv;
-    Stats stats;
-    int totalSize;
-    long stringSize;
-
     while(true){
   
         buildStats(&stats);
@@ -375,7 +385,6 @@ int main(int argc , char *argv[]){
         if (socket_desc == -1){
             printf("COULD NOT CREATE SOCKET\n");
         }
-             
         server.sin_addr.s_addr = inet_addr(destinationAddress);
         server.sin_family = AF_INET;
         server.sin_port = htons( destinationPort );
