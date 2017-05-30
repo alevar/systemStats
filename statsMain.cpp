@@ -26,6 +26,8 @@
 #include <sstream>
 #include <unistd.h>
 
+#define HOST_NAME_LEN 50    // Len of the char array to store the hostname
+
 int pageSize = getpagesize();
 
 // include timestamp for when the recording was made
@@ -275,9 +277,19 @@ typedef struct Stats {
 
     long loadavg; //rounded. needs to be devided by 10
 
-    std::string memPID;
-    std::string cpuPID;
+    std::string memPID; //stores stringified top pids and stats by memory usage
+    std::string cpuPID; //stores stringified top pids and stats by cpu usage
+    std::string hostName; //stores the hostname
 } stats;
+
+typedef struct CurTime {
+    long timeYEAR;
+    long timeMONTH;
+    long timeDAY;
+    long timeHOUR;
+    long timeMIN;
+    long timeSEC;
+} curTime;
 
 /*
 This function will likely iterate over the /proc/<procID>/stat and /proc/<procID>statm data
@@ -286,6 +298,7 @@ and return top n processes
 
 Perhaps it will only be called if the system load is above a certain threshhold
 */
+void getHostName(Stats*);
 void getDiskSpace(const char*,Stats*);
 void getCPU(Stats*);
 void getOther(Stats*);
@@ -300,14 +313,13 @@ void stringify(std::vector<T>*,std::string*);
 void buildStats(Stats*);
 void serialize(Stats*, char*, long);
 void getTime(Stats*);
+void log(Stats*,FILE*);
 
 int main(int argc , char *argv[]){
     int c;
-    int serverPort;
     int destinationPort;
     int updateSec;
     char * destinationAddress;
-    int this_option_optind;
     int option_index;
     struct hostent *he;
     struct sockaddr_in server;
@@ -319,7 +331,6 @@ int main(int argc , char *argv[]){
     long stringSize;
 
     while (1) {
-        this_option_optind = optind ? optind : 1;
         option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
@@ -336,26 +347,23 @@ int main(int argc , char *argv[]){
         switch (c) {
             case 0:
                 if (optarg){
-                    if (long_options[option_index].name == "port"){
+                    if (strcmp(long_options[option_index].name, "port")==0){
                         destinationPort = atoi(optarg);
                         printf("PORT SET TO: %s\n", optarg );
                     }
-                    if (long_options[option_index].name == "addr"){
+                    if (strcmp(long_options[option_index].name, "addr")==0){
                         if ((he = gethostbyname(optarg)) != NULL){
                             struct in_addr **addr_list = (in_addr **)he->h_addr_list;
                             char ip[100];
                             strcpy(ip, inet_ntoa(*addr_list[0]));
                             destinationAddress = ip;
                         }
-                        else if((he = gethostbyname(optarg)) == NULL){
-                            exit(1);
-                        }
                         else{
-                            destinationAddress = optarg;
+                            exit(1);
                         }
                         printf("ADDR SET TO: %s\n", destinationAddress);
                     }
-                    if (long_options[option_index].name == "sec"){
+                    if (strcmp(long_options[option_index].name, "sec")==0){
                         updateSec = atoi(optarg);
                         printf("UPDATE TIME SET TO: %s\n", optarg);
                     }
@@ -388,7 +396,7 @@ int main(int argc , char *argv[]){
         server.sin_addr.s_addr = inet_addr(destinationAddress);
         server.sin_family = AF_INET;
         server.sin_port = htons( destinationPort );
-        printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tload>%f\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+        printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tLoad%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
                                         stats.asb,
                                         stats.fsb,
                                         stats.asp,
@@ -398,13 +406,13 @@ int main(int argc , char *argv[]){
                                         stats.mab,
                                         stats.stb,
                                         stats.sab,
-                                        (float)stats.loadavg/100.0),
+                                        (float)stats.loadavg/100.0,
                                         stats.timeYEAR,
                                         stats.timeMONTH,
                                         stats.timeDAY,
                                         stats.timeHOUR,
                                         stats.timeMIN,
-                                        stats.timeSEC;
+                                        stats.timeSEC);
 
         if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
             printf("CONNECT ERROR\n");
@@ -412,7 +420,8 @@ int main(int argc , char *argv[]){
         }
 
         stringSize = stats.memPID.size()+
-                    stats.cpuPID.size();
+                    stats.cpuPID.size()+
+                    stats.hostName.size();
         totalSize = sizeof(stats.timeYEAR)+
                     sizeof(stats.timeMONTH)+
                     sizeof(stats.timeDAY)+
@@ -487,26 +496,19 @@ void serialize(Stats* msgPacket, char *data, long stringSize){
     *w = msgPacket->loadavg;   w++;
 
     char *p = (char*)w;
-    for(int i=0;i<msgPacket->memPID.size();i++){
+    for(unsigned int i=0;i<msgPacket->memPID.size();i++){
         *p = msgPacket->memPID.c_str()[i];  p++;
     }
-    // std::cout<<"===================================="<<std::endl;
-    std::stringstream ssTOP;
-    for(int i=0;i<msgPacket->cpuPID.size();i++){
-        *p = msgPacket->cpuPID.c_str()[i]; 
-        ssTOP<<*p; p++;
-        // std::cout<<msgPacket->cpuPID.c_str()[i];
+    for(unsigned int i=0;i<msgPacket->cpuPID.size();i++){
+        *p = msgPacket->cpuPID.c_str()[i]; p++;
     }
-    // std::string buf;
-    // while(ssTOP>>buf){
-    //     std::cout<<buf;
-    // }
-    // std::cout<<std::endl<<ssTOP.rdbuf();
-    // std::cout<<std::endl<<ssTOP.str();
-    // std::cout<<std::endl<<"===================================="<<std::endl;
+    for(unsigned int i=0;i<msgPacket->hostName.size();i++){
+        *p = msgPacket->hostName.c_str()[i]; p++;
+    }
 }
 
 void buildStats(Stats* stats){
+    getHostName(stats);
     getTime(stats);
     getDiskSpace("/",stats);
     getCPU(stats);
@@ -523,7 +525,7 @@ void buildStats(Stats* stats){
     stringify(&procCPU,&(stats->cpuPID));
     std::cout<<"PID\tMEM(B)\tUSER\tCOMM"<<std::endl;
     std::cout<<stats->memPID<<std::endl;
-    std::cout<<"PID\tCPU(\%)\tUSER\tCOMM"<<std::endl;
+    std::cout<<"PID\tCPU(%%)\tUSER\tCOMM"<<std::endl;
     std::cout<<stats->cpuPID<<std::endl;
 }
 
@@ -550,17 +552,16 @@ void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,st
     struct dirent* ent;
     long tgid;
 
-    long double a[33];
     FILE *fp;
     char path[40];
 
-    while(ent = readdir(proc)) {
+    while( (ent = readdir(proc)) ){
         if(!isdigit(*ent->d_name))
             continue;
 
         tgid = strtol(ent->d_name, NULL, 10);
         snprintf(path, 40, "/proc/%ld/stat", tgid);
-        if(fp = fopen(path,"r")){
+        if( (fp = fopen(path,"r")) ){
             fscanf(fp,"%i %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
                       /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
             &(pinfo->pid),                     //1
@@ -653,14 +654,14 @@ void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>> *proc
     FILE *fp;
     char path[40];
 
-    while(ent = readdir(proc)) {
+    while( (ent = readdir(proc)) ) {
         if(!isdigit(*ent->d_name))
             continue;
 
         tgid = strtol(ent->d_name, NULL, 10);
 
         snprintf(path, 40, "/proc/%ld/statm", tgid);
-        if(fp = fopen(path,"r")){
+        if( (fp = fopen(path,"r")) ){
             fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
             fclose(fp);
             struct passwd *pw;
@@ -705,12 +706,19 @@ bool comp(const std::tuple<long,int,std::string,std::string>& a, const std::tupl
     return std::get<1>(a) > std::get<1>(b);
 }
 
+void getHostName(Stats* stats){
+    char *hostName = new char [HOST_NAME_LEN];
+    int *t = new int;
+    *t = gethostname(hostName, HOST_NAME_LEN);
+    stats->hostName = std::string(hostName);
+    delete t;
+    delete []hostName;
+}
+
 void getDiskSpace(const char *path,Stats* stats){
     struct statvfs buf;
     struct stat fi;
 
-    int ret = statvfs("/",&buf);
-    unsigned long freeBlocks = buf.f_bfree;
     stat("/",&fi);
     stats->asb = buf.f_bavail*buf.f_bsize;
     stats->fsb = buf.f_bfree*buf.f_bsize;
@@ -721,7 +729,6 @@ void getDiskSpace(const char *path,Stats* stats){
 void getCPU(Stats* stats){
     long double a[4], b[4];
     FILE *fp;
-    char dump[50];
 
     fp = fopen("/proc/stat","r");
     fscanf(fp,"%*s %Lf %Lf %Lf %Lf",&a[0],&a[1],&a[2],&a[3]);
@@ -785,4 +792,30 @@ void getTime(Stats* stats){
     stats->timeHOUR = (long)(now->tm_hour);
     stats->timeMIN = (long)(now->tm_min);
     stats->timeSEC = (long)(now->tm_sec);
+}
+
+void log(Stats* stats,FILE* fp){
+    fprintf(fp, "<<TIME SENT> %li:%li:%li - %li:%li:%li\n",
+                    stats->timeYEAR,
+                    stats->timeMONTH,
+                    stats->timeDAY,
+                    stats->timeHOUR,
+                    stats->timeMIN,
+                    stats->timeSEC);
+
+    fprintf(fp, "Available Space(Bytes)>%lu\nFree Space(Bytes)>%lu\nAvailable Space(%%)>%lu\nFree Space(%%)>%lu\nUptime(seconds)>%li\nTotal Memory(Bytes)>%lu\nAvailable Memory(Bytes)>%lu\nTotal Swap(Bytes)>%lu\nAvailable Swap(Bytes)>%lu\nAverage Load>%.2f\n",
+                    stats->asb,
+                    stats->fsb,
+                    stats->asp,
+                    stats->fsp,
+                    stats->upt,
+                    stats->mtb,
+                    stats->mab,
+                    stats->stb,
+                    stats->sab,
+                    (float)(stats->loadavg/100.0));
+    fputs("PID\tMEM(B)\tUSER\tCOMMAND\n",fp);
+    fputs(stats->memPID.c_str(),fp);
+    fputs("PID\tCPU(%%)\tUSER\tCOMMAND\n",fp);
+    fputs(stats->cpuPID.c_str(),fp);
 }

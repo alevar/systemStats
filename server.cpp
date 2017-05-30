@@ -26,6 +26,7 @@
 #include <zlib.h>
 
 #define BACKLOG 1           // Number of connections to queue
+#define ZIP_DELAY 86400
 
 typedef struct procSTAT {
     //"%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d"
@@ -284,8 +285,9 @@ typedef struct Stats {
     long upt; //uptime in seconds
     long loadavg; //rounded. needs to be devided by 10
 
-    std::string memPID;
-    std::string cpuPID;
+    std::string memPID; //stores stringified top pids and stats by memory usage
+    std::string cpuPID; //stores stringified top pids and stats by cpu usage
+    std::string hostName; //stores the hostname
 } stats;
 
 typedef struct CurTime {
@@ -302,12 +304,53 @@ void stringify(std::vector<T>* v,std::string* stats);
 void deserialize(char *data, Stats* msgPacket,long* stringSize);
 void log(Stats*,FILE*);
 void getTime(CurTime*);
-void delay(Stats*);
+int delay(Stats*,FILE*);
+void compress(FILE*);
 
 int main(int argc , char *argv[])
 {
+    // int c;
+    // int serverPort;
+    // int timeZip;
+    // int option_index;
+    // int parentSocket, childSocket, addrlen;
+    // struct sockaddr_in server, client;
+
+    // while (1) {
+    //     option_index = 0;
+    //     static struct option long_options[] = {
+    //         {"port",     required_argument, 0,  0 },
+    //         {0,         0,                 0,  0 }
+    //     };
+
+    //     c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
+    //     if (c == -1){
+    //         break;
+    //     }
+
+    //     switch (c) {
+    //         case 0:
+    //             serverPort = atoi(optarg);
+    //             break;
+
+    //         case '?':
+    //             break;
+
+    //         default:
+    //             printf("?? getopt returned character code 0%o ??\n", c);
+    //     }
+    // }
+
+    // if (optind < argc) {
+    //     printf("non-option ARGV-elements: ");
+    //     while (optind < argc)
+    //         printf("%s ", argv[optind++]);
+    //     printf("\n");
+    // }
+
     int c;
     int serverPort;
+    int timeZip;
     int option_index;
     int parentSocket, childSocket, addrlen;
     struct sockaddr_in server, client;
@@ -316,17 +359,29 @@ int main(int argc , char *argv[])
         option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
+            {"zip",     required_argument, 0,  0 },
             {0,         0,                 0,  0 }
         };
 
         c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
-        if (c == -1){
+        if (c == -1) {
             break;
         }
 
         switch (c) {
             case 0:
-                serverPort = atoi(optarg);
+                if (optarg){
+                    if (strcmp(long_options[option_index].name, "port")==0){
+                        serverPort = atoi(optarg);
+                        printf("PORT SET TO: %s\n", optarg );
+                    }
+                    if (strcmp(long_options[option_index].name, "zip")==0){
+                        timeZip = atoi(optarg);
+                    }
+                    if (strcmp(long_options[option_index].name, "zip")!=0){
+                        timeZip = ZIP_DELAY;
+                    }
+                }
                 break;
 
             case '?':
@@ -343,6 +398,9 @@ int main(int argc , char *argv[])
             printf("%s ", argv[optind++]);
         printf("\n");
     }
+
+    // Check the time difference between the first time in the file and the current
+    // if more than a day - compress
 
     if((parentSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0)
     {
@@ -398,10 +456,6 @@ int main(int argc , char *argv[])
                         int* putData = new int;
                         *putData = 1;
 
-                        char *client_ip = inet_ntoa(client.sin_addr);
-                        FILE* fp = new FILE;
-                        fp = fopen(client_ip,"a");
-
                         if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
                             perror("recv()");
                             exit(1);
@@ -456,7 +510,17 @@ int main(int argc , char *argv[])
                                         temp->timeMIN,
                                         temp->timeSEC);
                                 send(childSocket,putData,sizeof(putData),0);
+                                FILE* fp = new FILE;
+                                if (FILE *file = fopen(temp->hostName.c_str(), "r")){
+                                    fclose(file);
+                                    fp = fopen(temp->hostName.c_str(),"ar+");
+                                    if( (delay(temp,fp)>=timeZip) ){
+                                        compress(fp);
+                                    }
+                                }
+                                fp = fopen(temp->hostName.c_str(),"ar+");
                                 log(temp,fp);
+                                fclose(fp);
                             }
                             else{
                                 std::cout<<"--------------------RESEND---------------------"<<std::endl;
@@ -464,7 +528,6 @@ int main(int argc , char *argv[])
                             delete temp;
                             // delete p;
                         }
-                        fclose(fp);
                         delete numbytes;
                         delete totalSize;
                         delete sizePID;
@@ -527,12 +590,9 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
 
     std::stringstream ssTOP;
     std::string bufMEM;
-    // std::cout<<"++++++++++++++++++++++++++++++++"<<std::endl;
     for(int i=0;i<*stringSize;i++){
-        // std::cout<<*p;
         ssTOP<<*p; p++;
     }
-    // std::cout<<"++++++++++++++++++++++++++++++++"<<std::endl;
     ssTOP<<'\0';
     ssTOP<<std::flush;
     std::vector<std::tuple <long,int,std::string,std::string>> vecMEM;
@@ -578,26 +638,29 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
     }
     std::cout<<"===============CPU================"<<std::endl;
+    ssTOP>>msgPacket->hostName;
+    std::cout<<"===============HOST_NAME================"<<std::endl;
+    std::cout<<msgPacket->hostName<<std::endl;
+    std::cout<<"===============HOST_NAME================"<<std::endl;
 }
 
 void log(Stats* stats,FILE* fp){
     CurTime* curT = new CurTime;
     getTime(curT);
-    fprintf(fp, "<<TIME SENT> %li:%li:%li - %li:%li:%li\n",
+    fprintf(fp, "<<TIME SENT> %li %li %li - %li %li %li \n",
                     stats->timeYEAR,
                     stats->timeMONTH,
                     stats->timeDAY,
                     stats->timeHOUR,
                     stats->timeMIN,
                     stats->timeSEC);
-    fprintf(fp, "TIME RECEIVED> %li:%li:%li - %li:%li:%li\n",
+    fprintf(fp, "TIME RECEIVED> %li %li %li - %li %li %li\n",
                     curT->timeYEAR,
                     curT->timeMONTH,
                     curT->timeDAY,
                     curT->timeHOUR,
                     curT->timeMIN,
                     curT->timeSEC);
-    // fputs("\n",fp);
     fprintf(fp, "Available Space(Bytes)>%lu\nFree Space(Bytes)>%lu\nAvailable Space(%%)>%lu\nFree Space(%%)>%lu\nUptime(seconds)>%li\nTotal Memory(Bytes)>%lu\nAvailable Memory(Bytes)>%lu\nTotal Swap(Bytes)>%lu\nAvailable Swap(Bytes)>%lu\nAverage Load>%.2f\n",
                     stats->asb,
                     stats->fsb,
@@ -611,22 +674,70 @@ void log(Stats* stats,FILE* fp){
                     (float)(stats->loadavg/100.0));
     fputs("PID\tMEM(B)\tUSER\tCOMMAND\n",fp);
     fputs(stats->memPID.c_str(),fp);
-    fputs("PID\tCPU(\%)\tUSER\tCOMMAND\n",fp);
+    fputs("PID\tCPU(%%)\tUSER\tCOMMAND\n",fp);
     fputs(stats->cpuPID.c_str(),fp);
     delete curT;
 }
 
-void getTime(CurTime* stats){
+void getTime(CurTime* cTime){
     time_t t = std::time(0);   // get time now
     struct tm * now = localtime( & t );
-    stats->timeYEAR = (long)(now->tm_year + 1900);
-    stats->timeMONTH = (long)(now->tm_mon + 1);
-    stats->timeDAY = (long)(now->tm_mday);
-    stats->timeHOUR = (long)(now->tm_hour);
-    stats->timeMIN = (long)(now->tm_min);
-    stats->timeSEC = (long)(now->tm_sec);
+    cTime->timeYEAR = (long)(now->tm_year + 1900);
+    cTime->timeMONTH = (long)(now->tm_mon + 1);
+    cTime->timeDAY = (long)(now->tm_mday);
+    cTime->timeHOUR = (long)(now->tm_hour);
+    cTime->timeMIN = (long)(now->tm_min);
+    cTime->timeSEC = (long)(now->tm_sec);
 }
 
-void delay(Stats* stats){
-    std::cout<<"Calculate time delay between package sent (from stats) and current time"<<std::endl;
+int delay(Stats* stats, FILE* fp){
+    int year, month, day, hour, minute, sec;
+    char c;
+    char str1[100], str2[100];
+    char sep;
+    int j = fscanf(fp,"%s %s %d %d %d %c %d %d %d %c",
+                    str1,
+                    str2,
+                    &year,
+                    &month,
+                    &day,
+                    &sep,
+                    &hour,
+                    &minute,
+                    &sec,
+                    &c);
+    if (j != 10 || c != '\n'){
+        struct tm *oldTime = new struct tm;
+        time_t now;
+        time(&now);
+        struct tm *now1 = localtime(&now);
+        std::cout<<"SOMETHING NOW:: "<<std::string(str1)<<" "<<std::string(str2)<<" "<<now1->tm_year<<" "<<now1->tm_mon<<" "<<now1->tm_mday<<" "<<sep<<" "<<now1->tm_hour<<" "<<now1->tm_min<<" "<<now1->tm_sec<<std::endl;
+
+        oldTime->tm_hour = hour;
+        oldTime->tm_min  = minute;
+        oldTime->tm_sec  = sec;
+        oldTime->tm_year = year-1900;
+        oldTime->tm_mon  = month-1;
+        oldTime->tm_mday = day;
+        std::cout<<"HELLO::: "<<mktime(now1)<<"::::"<<mktime(oldTime)<<":::: "<<std::endl;
+
+        std::cout<<"SOMETHING OLD:: "<<std::string(str1)<<" "<<std::string(str2)<<" "<<oldTime->tm_year<<" "<<oldTime->tm_mon<<" "<<oldTime->tm_mday<<" "<<sep<<" "<<oldTime->tm_hour<<" "<<oldTime->tm_min<<" "<<oldTime->tm_sec<<std::endl;
+        double seconds = mktime(now1)-mktime(oldTime);
+        printf ("%.f seconds since new year in the current timezone.\n", seconds);
+        delete oldTime;
+        return seconds;
+    }
+    else{
+        return 0;
+    }
+}
+
+void compress(FILE* fp){
+    std::cout<<"Hello world"<<std::endl;
+    gzFile *fi = new gzFile;
+    *fi = gzopen("test.gz", "wb");
+    gzwrite(*fi,"my decompressed data",strlen("my decompressed data"));
+    gzclose(*fi);
+    std::cout<<"End world"<<std::endl;
+    delete fi;
 }
