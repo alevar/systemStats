@@ -24,6 +24,8 @@
 #include <sstream>
 #include <ctime>
 #include <zlib.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define BACKLOG 1           // Number of connections to queue
 #define ZIP_DELAY 86400
@@ -306,12 +308,14 @@ void log(Stats*,FILE*);
 void getTime(CurTime*);
 int delay(Stats*,FILE*);
 void compress(FILE*,const char*,Stats*);
+void printStats(Stats*);
+int child(int,int);
 
 int main(int argc , char *argv[])
 {
+    int timeZip;
     int c;
     int serverPort;
-    int timeZip;
     int option_index;
     int parentSocket, childSocket, addrlen;
     struct sockaddr_in server, client;
@@ -389,6 +393,8 @@ int main(int argc , char *argv[])
     puts("Waiting for incoming connections...");
     addrlen = sizeof(struct sockaddr_in);
 
+    int status;
+
     while(true){
         if((childSocket = accept(parentSocket, (struct sockaddr *)&client, (socklen_t*)&addrlen)) < 0){
             close(childSocket);
@@ -409,95 +415,14 @@ int main(int argc , char *argv[])
                     {
                         // printf("CONNECTED\n");
                         close(parentSocket);
-
-                        Stats* temp = new Stats;
-                        int* numbytes = new int;
-                        long* totalSize = new long;
-                        long* sizePID = new long;
-                        int* putData = new int;
-                        *putData = 1;
-
-                        if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
-                            perror("recv()");
-                            exit(1);
-                        }
-                        else{
-                            *sizePID = *totalSize-(long)(sizeof(temp->timeYEAR)+
-                                                         sizeof(temp->timeMONTH)+
-                                                         sizeof(temp->timeDAY)+
-                                                         sizeof(temp->timeHOUR)+
-                                                         sizeof(temp->timeMIN)+
-                                                         sizeof(temp->timeSEC)+
-                                                         sizeof(temp->asb)+
-                                                         sizeof(temp->fsb)+
-                                                         sizeof(temp->asp)+
-                                                         sizeof(temp->fsp)+
-                                                         sizeof(temp->mtb)+
-                                                         sizeof(temp->mab)+
-                                                         sizeof(temp->stb)+
-                                                         sizeof(temp->sab)+
-                                                         sizeof(temp->upt)+
-                                                         sizeof(temp->loadavg));
-
-                            char data[(*totalSize)];
-                            char *p = data;
-                            bool dataRECV = false;
-                            while((*numbytes = recv(childSocket, p, *totalSize, 0))>0){
-                                if(*numbytes == 0){
-                                    break;
-                                }
-                                *totalSize-=*numbytes;
-                                p += *numbytes;
-                                dataRECV = true;
-                            }
-                            if(dataRECV){
-                                dataRECV = false;
-                                deserialize(data, temp, sizePID);
-                                // printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
-                                //         temp->asb,
-                                //         temp->fsb,
-                                //         temp->asp,
-                                //         temp->fsp,
-                                //         temp->upt,
-                                //         temp->mtb,
-                                //         temp->mab,
-                                //         temp->stb,
-                                //         temp->sab,
-                                //         (float)(temp->loadavg/100.0),
-                                //         temp->timeYEAR,
-                                //         temp->timeMONTH,
-                                //         temp->timeDAY,
-                                //         temp->timeHOUR,
-                                //         temp->timeMIN,
-                                //         temp->timeSEC);
-                                send(childSocket,putData,sizeof(putData),0);
-                                FILE* fp = new FILE;
-                                if (FILE *file = fopen(temp->hostName.c_str(), "r")){
-                                    fclose(file);
-                                    fp = fopen(temp->hostName.c_str(),"ar+");
-                                    if( (delay(temp,fp)>=timeZip) ){
-                                        compress(fp,temp->hostName.c_str(),temp);
-                                    }
-                                }
-                                else{
-                                    fp = fopen(temp->hostName.c_str(),"ar+");
-                                }
-                                log(temp,fp);
-                                fclose(fp);
-                            }
-                            // else{
-                            //     std::cout<<"--------------------RESEND---------------------"<<std::endl;
-                            // }
-                            delete temp;
-                            // delete p;
-                        }
-                        delete numbytes;
-                        delete totalSize;
-                        delete sizePID;
-                        delete putData;
+                        child(childSocket,timeZip);
+                        std::cout<<"DONE WITH CHILD"<<std::endl;
+                        break;
                     }
                 default:    // Parent
                     close(childSocket);
+                    while (-1 == waitpid(*new_fork, &status, 0));
+                    kill(*new_fork,SIGKILL);
                     delete new_fork;
                     continue;
             }
@@ -670,20 +595,20 @@ int delay(Stats* stats, FILE* fp){
                     &sec,
                     &c);
     if (j != 10 || c != '\n'){
-        struct tm *oldTime = new struct tm;
+        struct tm oldTime;
         time_t now;
         time(&now);
         struct tm *now1 = localtime(&now);
 
-        oldTime->tm_hour = hour;
-        oldTime->tm_min  = minute;
-        oldTime->tm_sec  = sec;
-        oldTime->tm_year = year-1900;
-        oldTime->tm_mon  = month-1;
-        oldTime->tm_mday = day;
+        oldTime.tm_hour = hour;
+        oldTime.tm_min  = minute;
+        oldTime.tm_sec  = sec;
+        oldTime.tm_year = year-1900;
+        oldTime.tm_mon  = month-1;
+        oldTime.tm_mday = day;
 
-        double seconds = mktime(now1)-mktime(oldTime);
-        delete oldTime;
+        double seconds = mktime(now1)-mktime(&oldTime);
+        // delete oldTime;
         return seconds;
     }
     else{
@@ -707,4 +632,94 @@ void compress(FILE *fp, const char *name,Stats* stats){
     remove(name);
     delete fi;
     delete[] where;
+}
+
+int child(int childSocket,int timeZip){
+    Stats* temp = new Stats;
+    int* numbytes = new int;
+    long* totalSize = new long;
+    long* sizePID = new long;
+    int* putData = new int;
+    *putData = 1;
+
+    if((*numbytes = recv(childSocket, totalSize, sizeof(*totalSize), 0)) == -1){
+        perror("recv()");
+        exit(1);
+    }
+    else{
+        *sizePID = *totalSize-(long)(sizeof(temp->timeYEAR)+
+                                     sizeof(temp->timeMONTH)+
+                                     sizeof(temp->timeDAY)+
+                                     sizeof(temp->timeHOUR)+
+                                     sizeof(temp->timeMIN)+
+                                     sizeof(temp->timeSEC)+
+                                     sizeof(temp->asb)+
+                                     sizeof(temp->fsb)+
+                                     sizeof(temp->asp)+
+                                     sizeof(temp->fsp)+
+                                     sizeof(temp->mtb)+
+                                     sizeof(temp->mab)+
+                                     sizeof(temp->stb)+
+                                     sizeof(temp->sab)+
+                                     sizeof(temp->upt)+
+                                     sizeof(temp->loadavg));
+
+        char data[(*totalSize)];
+        char *p = data;
+        bool dataRECV = false;
+        while((*numbytes = recv(childSocket, p, *totalSize, 0))>0){
+            if(*numbytes == 0){
+                break;
+            }
+            *totalSize-=*numbytes;
+            p += *numbytes;
+            dataRECV = true;
+        }
+        if(dataRECV){
+            dataRECV = false;
+            deserialize(data, temp, sizePID);
+            printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+                    temp->asb,
+                    temp->fsb,
+                    temp->asp,
+                    temp->fsp,
+                    temp->upt,
+                    temp->mtb,
+                    temp->mab,
+                    temp->stb,
+                    temp->sab,
+                    (float)(temp->loadavg/100.0),
+                    temp->timeYEAR,
+                    temp->timeMONTH,
+                    temp->timeDAY,
+                    temp->timeHOUR,
+                    temp->timeMIN,
+                    temp->timeSEC);
+            send(childSocket,putData,sizeof(*putData),0);
+            FILE* fp = new FILE;
+            if (FILE *file = fopen(temp->hostName.c_str(), "r")){
+                fclose(file);
+                fp = fopen(temp->hostName.c_str(),"ar+");
+                if( (delay(temp,fp)>=timeZip) ){
+                    compress(fp,temp->hostName.c_str(),temp);
+                }
+            }
+            else{
+                fp = fopen(temp->hostName.c_str(),"ar+");
+            }
+            log(temp,fp);
+            fclose(fp);
+        }
+        // else{
+        //     std::cout<<"--------------------RESEND---------------------"<<std::endl;
+        // }
+        delete temp;
+        // delete p;
+    }
+    delete numbytes;
+    delete totalSize;
+    delete sizePID;
+    delete putData;
+    close(childSocket);
+    return 1;
 }

@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #define HOST_NAME_LEN 50    // Len of the char array to store the hostname
+#define PRINT_STATS false
 
 int pageSize = getpagesize();
 
@@ -40,11 +41,11 @@ typedef struct procSTAT {
      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
     int pid; //%d The process ID.
 
-    int comm; /*%s The filename of the executable, in parentheses.
+    char comm; /*%s The filename of the executable, in parentheses.
                     This is visible whether or not the executable is
                     swapped out.*/
 
-    int state; /*%c One of the following characters, indicating process
+    char state; /*%c One of the following characters, indicating process
                         state:
                         R  Running
                         S  Sleeping in an interruptible wait
@@ -59,18 +60,18 @@ typedef struct procSTAT {
                         W  Waking (Linux 2.6.33 to 3.13 only)
                         P  Parked (Linux 3.9 to 3.13 only)*/
 
-    double ppid; //%d The PID of the parent of this process.
+    int ppid; //%d The PID of the parent of this process.
 
-    double pgrp; //%d The process group ID of the process.
+    int pgrp; //%d The process group ID of the process.
 
-    double session; //%d The session ID of the process.
+    int session; //%d The session ID of the process.
 
-    double tty_nr; /*%d The controlling terminal of the process.  (The minor
+    int tty_nr; /*%d The controlling terminal of the process.  (The minor
                         device number is contained in the combination of
                         bits 31 to 20 and 7 to 0; the major device number is
                         in bits 15 to 8.)*/
 
-    double tpgid; /*%d The ID of the foreground process group of the
+    int tpgid; /*%d The ID of the foreground process group of the
                         controlling terminal of the process.*/
 
     unsigned int flags; /*%u The kernel flags word of the process.  For bit
@@ -80,21 +81,21 @@ typedef struct procSTAT {
 
                         The format for this field was %lu before Linux 2.6.*/
 
-    unsigned long minflt; /*%lu The number of minor faults the process has made
+    long unsigned int minflt; /*%lu The number of minor faults the process has made
                         which have not required loading a memory page from
                         disk.*/
 
-    unsigned long cminflt; /*%lu The number of minor faults that the process's
+    long unsigned int cminflt; /*%lu The number of minor faults that the process's
                         waited-for children have made.*/
 
-    unsigned long majflt; /*%lu
+    long unsigned int majflt; /*%lu
                         The number of major faults the process has made
                         which have required loading a memory page from disk.*/
 
-    unsigned long cmajflt; /*%lu The number of major faults that the process's
+    long unsigned int cmajflt; /*%lu The number of major faults that the process's
                         waited-for children have made.*/
 
-    unsigned long utime; /*%lu Amount of time that this process has been scheduled
+    long unsigned int utime; /*%lu Amount of time that this process has been scheduled
                         in user mode, measured in clock ticks (divide by
                         sysconf(_SC_CLK_TCK)).  This includes guest time,
                         guest_time (time spent running a virtual CPU, see
@@ -102,23 +103,23 @@ typedef struct procSTAT {
                         the guest time field do not lose that time from
                         their calculations.*/
 
-    unsigned long stime; /*%lu Amount of time that this process has been scheduled
+    long unsigned int stime; /*%lu Amount of time that this process has been scheduled
                         in kernel mode, measured in clock ticks (divide by
                         sysconf(_SC_CLK_TCK)).*/
 
-    unsigned long cutime; /*%ld Amount of time that this process's waited-for
+    long int cutime; /*%ld Amount of time that this process's waited-for
                         children have been scheduled in user mode, measured
                         in clock ticks (divide by sysconf(_SC_CLK_TCK)).
                         (See also times(2).)  This includes guest time,
                         cguest_time (time spent running a virtual CPU, see
                         below).*/
 
-    unsigned long cstime; /*%ld Amount of time that this process's waited-for
+    long int cstime; /*%ld Amount of time that this process's waited-for
                         children have been scheduled in kernel mode,
                         measured in clock ticks (divide by
                         sysconf(_SC_CLK_TCK)).*/
 
-    long double priority; /*%ld (Explanation for Linux 2.6) For processes running a
+    long int priority; /*%ld (Explanation for Linux 2.6) For processes running a
                         real-time scheduling policy (policy below; see
                         sched_setscheduler(2)), this is the negated
                         scheduling priority, minus one; that is, a number in
@@ -133,84 +134,84 @@ typedef struct procSTAT {
                         Before Linux 2.6, this was a scaled value based on
                         the scheduler weighting given to this process.*/
 
-    long double nice; /*%ld The nice value (see setpriority(2)), a value in the
+    long int nice; /*%ld The nice value (see setpriority(2)), a value in the
                         range 19 (low priority) to -20 (high priority).*/
 
-    long double num_threads; /*%ld Number of threads in this process (since Linux 2.6).
+    long int num_threads; /*%ld Number of threads in this process (since Linux 2.6).
                         Before kernel 2.6, this field was hard coded to 0 as
                         a placeholder for an earlier removed field.*/
 
-    long double itrealvalue; /*%ld The time in jiffies before the next SIGALRM is sent
+    long int itrealvalue; /*%ld The time in jiffies before the next SIGALRM is sent
                         to the process due to an interval timer.  Since
                         kernel 2.6.17, this field is no longer maintained,
                         and is hard coded as 0.*/
 
-    unsigned long long starttime; /*%llu The time the process started after system boot.  In
+    long long unsigned int starttime; /*%llu The time the process started after system boot.  In
                         kernels before Linux 2.6, this value was expressed
                         in jiffies.  Since Linux 2.6, the value is expressed
                         in clock ticks (divide by sysconf(_SC_CLK_TCK)).
 
                         The format for this field was %lu before Linux 2.6.*/
 
-    unsigned long vsize; /*%lu Virtual memory size in bytes.*/
+    long unsigned int vsize; /*%lu Virtual memory size in bytes.*/
 
-    long double rss; /*%ld Resident Set Size: number of pages the process has
+    long int rss; /*%ld Resident Set Size: number of pages the process has
                         in real memory.  This is just the pages which count
                         toward text, data, or stack space.  This does not
                         include pages which have not been demand-loaded in,
                         or which are swapped out.*/
 
-    unsigned long rsslim; /*%lu Current soft limit in bytes on the rss of the
+    long unsigned int rsslim; /*%lu Current soft limit in bytes on the rss of the
                         process; see the description of RLIMIT_RSS in
                         getrlimit(2).*/
 
-    unsigned long startcode; /*%lu  [PT] The address above which program text can run.*/
+    long unsigned int startcode; /*%lu  [PT] The address above which program text can run.*/
 
-    unsigned long endcode; /*%lu  [PT] The address below which program text can run.*/
+    long unsigned int endcode; /*%lu  [PT] The address below which program text can run.*/
 
-    unsigned long startstack; /*%lu  [PT] The address of the start (i.e., bottom) of the
+    long unsigned int startstack; /*%lu  [PT] The address of the start (i.e., bottom) of the
                         stack.*/
 
-    unsigned long kstkesp; /*%lu  [PT] The current value of ESP (stack pointer), as found
+    long unsigned int kstkesp; /*%lu  [PT] The current value of ESP (stack pointer), as found
                         in the kernel stack page for the process.*/
 
-    unsigned long kstkeip; /*%lu  [PT] The current EIP (instruction pointer).*/
+    long unsigned int kstkeip; /*%lu  [PT] The current EIP (instruction pointer).*/
 
-    unsigned long signal; /*%lu The bitmap of pending signals, displayed as a
+    long unsigned int signal; /*%lu The bitmap of pending signals, displayed as a
                         decimal number.  Obsolete, because it does not
                         provide information on real-time signals; use
                         /proc/[pid]/status instead.*/
 
-    unsigned long blocked; /*%lu The bitmap of blocked signals, displayed as a
+    long unsigned int blocked; /*%lu The bitmap of blocked signals, displayed as a
                         decimal number.  Obsolete, because it does not
                         provide information on real-time signals; use
                         /proc/[pid]/status instead.*/
 
-    unsigned long sigignore; /*%lu The bitmap of ignored signals, displayed as a
+    long unsigned int sigignore; /*%lu The bitmap of ignored signals, displayed as a
                         decimal number.  Obsolete, because it does not
                         provide information on real-time signals; use
                         /proc/[pid]/status instead.*/
 
-    unsigned long sigcatch; /*%lu
+    long unsigned int sigcatch; /*%lu
                         The bitmap of caught signals, displayed as a decimal
                         number.  Obsolete, because it does not provide
                         information on real-time signals; use
                         /proc/[pid]/status instead.*/
 
-    unsigned long wchan; /*%lu  [PT] This is the "channel" in which the process is
+    long unsigned int wchan; /*%lu  [PT] This is the "channel" in which the process is
                         waiting.  It is the address of a location in the
                         kernel where the process is sleeping.  The
                         corresponding symbolic name can be found in
                         /proc/[pid]/wchan.*/
 
-    unsigned long nswap; /*%lu Number of pages swapped (not maintained).*/
+    long unsigned int nswap; /*%lu Number of pages swapped (not maintained).*/
 
-    unsigned long cnswap; /*%lu Cumulative nswap for child processes (not
+    long unsigned int cnswap; /*%lu Cumulative nswap for child processes (not
                         maintained).*/
 
-    double exit_signal; /*%d  (since Linux 2.1.22) Signal to be sent to parent when we die.*/
+    int exit_signal; /*%d  (since Linux 2.1.22) Signal to be sent to parent when we die.*/
 
-    double processor; /*%d  (since Linux 2.2.8) CPU number last executed on.*/
+    int processor; /*%d  (since Linux 2.2.8) CPU number last executed on.*/
 
     unsigned int rt_priority; /*%u  (since Linux 2.5.19) Real-time scheduling priority, a number in the range
                         1 to 99 for processes scheduled under a real-time
@@ -223,36 +224,36 @@ typedef struct procSTAT {
                         The format for this field was %lu before Linux
                         2.6.22.*/
 
-    unsigned long long delayacct_blkio_ticks; /*%llu  (since Linux 2.6.18) Aggregated block I/O delays, measured in clock ticks
+    long long unsigned int delayacct_blkio_ticks; /*%llu  (since Linux 2.6.18) Aggregated block I/O delays, measured in clock ticks
                         (centiseconds).*/
 
-    unsigned long guest_time; /*%lu  (since Linux 2.6.24) Guest time of the process (time spent running a
+    long unsigned int guest_time; /*%lu  (since Linux 2.6.24) Guest time of the process (time spent running a
                         virtual CPU for a guest operating system), measured
                         in clock ticks (divide by sysconf(_SC_CLK_TCK)).*/
 
-    long double cguest_time; /*%ld  (since Linux 2.6.24) Guest time of the process's children, measured in
+    long int cguest_time; /*%ld  (since Linux 2.6.24) Guest time of the process's children, measured in
                         clock ticks (divide by sysconf(_SC_CLK_TCK)).*/
 
-    unsigned long start_data; /*%lu  (since Linux 3.3)  [PT] Address above which program initialized and
+    long unsigned int start_data; /*%lu  (since Linux 3.3)  [PT] Address above which program initialized and
                         uninitialized (BSS) data are placed.*/
 
-    unsigned long end_data; /*%lu  (since Linux 3.3)  [PT] Address below which program initialized and
+    long unsigned int end_data; /*%lu  (since Linux 3.3)  [PT] Address below which program initialized and
                         uninitialized (BSS) data are placed.*/
 
-    unsigned long start_brk; /*%lu  (since Linux 3.3)  [PT] Address above which program heap can be expanded
+    long unsigned int start_brk; /*%lu  (since Linux 3.3)  [PT] Address above which program heap can be expanded
                         with brk(2).*/
 
-    unsigned long arg_start; /*%lu  (since Linux 3.5)  [PT] Address above which program command-line arguments
+    long unsigned int arg_start; /*%lu  (since Linux 3.5)  [PT] Address above which program command-line arguments
                         (argv) are placed.*/
 
-    unsigned long arg_end; /*%lu  (since Linux 3.5)  [PT] Address below program command-line arguments (argv)
+    long unsigned int arg_end; /*%lu  (since Linux 3.5)  [PT] Address below program command-line arguments (argv)
                         are placed.*/
 
-    unsigned long env_start; /*%lu  (since Linux 3.5)  [PT] Address above which program environment is placed.*/
+    long unsigned int env_start; /*%lu  (since Linux 3.5)  [PT] Address above which program environment is placed.*/
 
-    unsigned long env_end; /*%lu  (since Linux 3.5)  [PT] Address below which program environment is placed.*/
+    long unsigned int env_end; /*%lu  (since Linux 3.5)  [PT] Address below which program environment is placed.*/
 
-    double exit_code; /*%d  (since Linux 3.5)  [PT] The thread's exit status in the form reported by
+    int exit_code; /*%d  (since Linux 3.5)  [PT] The thread's exit status in the form reported by
                         waitpid(2).*/
 } procinfo;
 
@@ -263,16 +264,16 @@ typedef struct Stats {
     long timeHOUR;
     long timeMIN;
     long timeSEC;
-    unsigned long asb; //available space in bytes
-    unsigned long fsb; //free space in bytes
-    unsigned long asp; //available space in percent
-    unsigned long fsp; //free space in percent
+    long unsigned int asb; //available space in bytes
+    long unsigned int fsb; //free space in bytes
+    long unsigned int asp; //available space in percent
+    long unsigned int fsp; //free space in percent
 
-    unsigned long mtb; //total memory in bytes
-    unsigned long mab; //memory available in bytes
+    long unsigned int mtb; //total memory in bytes
+    long unsigned int mab; //memory available in bytes
 
-    unsigned long stb; //total swap in bytes
-    unsigned long sab; //available swap in bytes
+    long unsigned int stb; //total swap in bytes
+    long unsigned int sab; //available swap in bytes
     long upt; //uptime in seconds
 
     long loadavg; //rounded. needs to be devided by 10
@@ -307,13 +308,14 @@ bool comp(const std::tuple<long,int,std::string,std::string>&, const std::tuple<
 unsigned long getUID(std::string);
 void getCMD(std::string,char*);
 void parseStatm(std::vector<std::tuple <long,int,std::string,std::string>>*);
-void parseStat(procinfo*,std::vector<std::tuple <long,float,std::string,std::string>>*,long);
+void parseStat(procSTAT*,std::vector<std::tuple <long,float,std::string,std::string>>*,long);
 template <class T>
 void stringify(std::vector<T>*,std::string*);
 void buildStats(Stats*);
 void serialize(Stats*, char*, long);
 void getTime(Stats*);
 void log(Stats*,FILE*);
+void printStats(Stats*);
 
 int main(int argc , char *argv[]){
     int c;
@@ -326,9 +328,10 @@ int main(int argc , char *argv[]){
     int socket_desc;
     int closeCall;
     bool waitRecv;
-    Stats stats;
     int totalSize;
     long stringSize;
+    bool printArg = PRINT_STATS;
+    Stats statsMain;
 
     while (1) {
         option_index = 0;
@@ -336,6 +339,7 @@ int main(int argc , char *argv[]){
             {"port",     required_argument, 0,  0 },
             {"addr",     required_argument, 0,  0 },
             {"sec",     required_argument, 0,  0 },
+            {"print",   required_argument, 0,   0},
             {0,         0,                 0,  0 }
         };
 
@@ -367,6 +371,9 @@ int main(int argc , char *argv[]){
                         updateSec = atoi(optarg);
                         printf("UPDATE TIME SET TO: %s\n", optarg);
                     }
+                    if (strcmp(long_options[option_index].name, "print")==0){
+                        printArg = true;
+                    }
                 }
                 break;
 
@@ -385,9 +392,12 @@ int main(int argc , char *argv[]){
         printf("\n");
     }
 
+    if(printArg){
+        std::cout<<"HELLO WORLD"<<std::endl;
+    }
+
     while(true){
-  
-        buildStats(&stats);
+        buildStats(&statsMain);
 
         socket_desc = socket(AF_INET , SOCK_STREAM , 0);
         if (socket_desc == -1){
@@ -419,50 +429,51 @@ int main(int argc , char *argv[]){
             return 1;
         }
 
-        stringSize = stats.memPID.size()+
-                    stats.cpuPID.size()+
-                    stats.hostName.size();
-        totalSize = sizeof(stats.timeYEAR)+
-                    sizeof(stats.timeMONTH)+
-                    sizeof(stats.timeDAY)+
-                    sizeof(stats.timeHOUR)+
-                    sizeof(stats.timeMIN)+
-                    sizeof(stats.timeSEC)+
-                    sizeof(stats.asb)+
-                    sizeof(stats.fsb)+
-                    sizeof(stats.asp)+
-                    sizeof(stats.fsp)+
-                    sizeof(stats.mtb)+
-                    sizeof(stats.mab)+
-                    sizeof(stats.stb)+
-                    sizeof(stats.sab)+
-                    sizeof(stats.upt)+
-                    sizeof(stats.loadavg)+
+        stringSize = statsMain.memPID.size()+
+                    statsMain.cpuPID.size()+
+                    statsMain.hostName.size();
+        totalSize = sizeof(statsMain.timeYEAR)+
+                    sizeof(statsMain.timeMONTH)+
+                    sizeof(statsMain.timeDAY)+
+                    sizeof(statsMain.timeHOUR)+
+                    sizeof(statsMain.timeMIN)+
+                    sizeof(statsMain.timeSEC)+
+                    sizeof(statsMain.asb)+
+                    sizeof(statsMain.fsb)+
+                    sizeof(statsMain.asp)+
+                    sizeof(statsMain.fsp)+
+                    sizeof(statsMain.mtb)+
+                    sizeof(statsMain.mab)+
+                    sizeof(statsMain.stb)+
+                    sizeof(statsMain.sab)+
+                    sizeof(statsMain.upt)+
+                    sizeof(statsMain.loadavg)+
                     stringSize;
 
         char data1[totalSize];
-        serialize(&stats, data1,(long)totalSize);
+        serialize(&statsMain, data1,(long)totalSize);
         char *p = data1;
         int* numbytes = new int;
 
-        while((*numbytes=send(socket_desc,p,sizeof(data1),MSG_CONFIRM))>0){
+        while((*numbytes=send(socket_desc,p,sizeof(p),MSG_CONFIRM))>0){
             p+=*numbytes;
         }
 
-        waitRecv= true;
-        while(waitRecv){
-            if((*numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
-                perror("recv()");
-                exit(1);
-            }
-            else{
-                waitRecv = false;
-                if(closeCall==1){
-                    close(socket_desc);
-                }
-            }
-        }
+        // waitRecv= true;
+        // while(waitRecv){
+        //     if((*numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
+        //         perror("recv()");
+        //         break;
+        //     }
+        //     else{
+        //         waitRecv = false;
+        //         if(closeCall==1){
+        //             close(socket_desc);
+        //         }
+        //     }
+        // }
         delete numbytes;
+        close(socket_desc);
         sleep(updateSec);
     }
     return 0;
@@ -519,7 +530,7 @@ void buildStats(Stats* stats){
     parseStatm(&procMem);
     stringify(&procMem,&(stats->memPID));
 
-    procinfo pinfo;
+    procSTAT pinfo;
     std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
     parseStat(&pinfo,&procCPU,stats->upt);
     stringify(&procCPU,&(stats->cpuPID));
@@ -546,24 +557,25 @@ void stringify(std::vector<T>* v,std::string* stats){
     *stats = ss.str();
 }
 
-void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime){
+void parseStat(procSTAT *pinfo,std::vector<std::tuple <long,float,std::string,std::string>> *procs,long uptime){
     DIR* proc = opendir("/proc");
     int hertz = sysconf(_SC_CLK_TCK);
     struct dirent* ent;
     long tgid;
 
     FILE *fp;
-    char path[40];
+    char result[10000];
 
     while( (ent = readdir(proc)) ){
-        if(!isdigit(*ent->d_name))
+        if(!isdigit(*ent->d_name)){
             continue;
+        }
 
         tgid = strtol(ent->d_name, NULL, 10);
-        snprintf(path, 40, "/proc/%ld/stat", tgid);
-        if( (fp = fopen(path,"r")) ){
-            fscanf(fp,"%i %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
-                      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  37 38 39 40 41   42  43  44  45  46  47  48  49  50  51 52*/
+        snprintf(result, 10000, "/proc/%ld/stat", tgid);
+        if( (fp = fopen(result,"r")) ){
+            fscanf(fp,"%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu  %lu %d %d %u %u %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %d",
+                      /*1  2  3  4  5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22   23  24  25  26  27  28  29  30  31  32  33  34  35  36   37 38 39 40 41   42  43  44  45  46  47  48  49  50  51  52*/
             &(pinfo->pid),                     //1
             &(pinfo->comm),                    //2
             &(pinfo->state),                   //3
@@ -624,14 +636,14 @@ void parseStat(procinfo *pinfo,std::vector<std::tuple <long,float,std::string,st
 
             struct passwd *pw;
 
-            snprintf(path, 40, "/proc/%ld/loginuid", tgid);
-            unsigned long uid = getUID(path);
+            snprintf(result, 10000, "/proc/%ld/loginuid", tgid);
+            unsigned long uid = getUID(result);
             if (uid != (unsigned int)-1){
                 pw = getpwuid((uid_t)uid);
 
-                snprintf(path, 40, "/proc/%ld/cmdline", tgid);
-                char comm[1000];
-                getCMD(path,comm);
+                snprintf(result, 10000, "/proc/%ld/cmdline", tgid);
+                char comm[10000];
+                getCMD(result,comm);
                 std::string test(comm);
 
                 procs->push_back(std::make_tuple(tgid,cpu_usage,pw->pw_name,test));
@@ -717,9 +729,9 @@ void getHostName(Stats* stats){
 
 void getDiskSpace(const char *path,Stats* stats){
     struct statvfs buf;
-    struct stat fi;
+    // struct stat fi;
 
-    stat("/",&fi);
+    statvfs("/",&buf);
     stats->asb = buf.f_bavail*buf.f_bsize;
     stats->fsb = buf.f_bfree*buf.f_bsize;
     stats->asp = 100.0 * (double)buf.f_bavail / (double)buf.f_blocks;
