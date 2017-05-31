@@ -305,49 +305,10 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize);
 void log(Stats*,FILE*);
 void getTime(CurTime*);
 int delay(Stats*,FILE*);
-void compress(FILE*);
+void compress(FILE*,const char*,Stats*);
 
 int main(int argc , char *argv[])
 {
-    // int c;
-    // int serverPort;
-    // int timeZip;
-    // int option_index;
-    // int parentSocket, childSocket, addrlen;
-    // struct sockaddr_in server, client;
-
-    // while (1) {
-    //     option_index = 0;
-    //     static struct option long_options[] = {
-    //         {"port",     required_argument, 0,  0 },
-    //         {0,         0,                 0,  0 }
-    //     };
-
-    //     c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
-    //     if (c == -1){
-    //         break;
-    //     }
-
-    //     switch (c) {
-    //         case 0:
-    //             serverPort = atoi(optarg);
-    //             break;
-
-    //         case '?':
-    //             break;
-
-    //         default:
-    //             printf("?? getopt returned character code 0%o ??\n", c);
-    //     }
-    // }
-
-    // if (optind < argc) {
-    //     printf("non-option ARGV-elements: ");
-    //     while (optind < argc)
-    //         printf("%s ", argv[optind++]);
-    //     printf("\n");
-    // }
-
     int c;
     int serverPort;
     int timeZip;
@@ -446,7 +407,7 @@ int main(int argc , char *argv[])
                     }
                 case 0: // Child
                     {
-                        printf("CONNECTED\n");
+                        // printf("CONNECTED\n");
                         close(parentSocket);
 
                         Stats* temp = new Stats;
@@ -492,39 +453,41 @@ int main(int argc , char *argv[])
                             if(dataRECV){
                                 dataRECV = false;
                                 deserialize(data, temp, sizePID);
-                                printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
-                                        temp->asb,
-                                        temp->fsb,
-                                        temp->asp,
-                                        temp->fsp,
-                                        temp->upt,
-                                        temp->mtb,
-                                        temp->mab,
-                                        temp->stb,
-                                        temp->sab,
-                                        (float)(temp->loadavg/100.0),
-                                        temp->timeYEAR,
-                                        temp->timeMONTH,
-                                        temp->timeDAY,
-                                        temp->timeHOUR,
-                                        temp->timeMIN,
-                                        temp->timeSEC);
+                                // printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+                                //         temp->asb,
+                                //         temp->fsb,
+                                //         temp->asp,
+                                //         temp->fsp,
+                                //         temp->upt,
+                                //         temp->mtb,
+                                //         temp->mab,
+                                //         temp->stb,
+                                //         temp->sab,
+                                //         (float)(temp->loadavg/100.0),
+                                //         temp->timeYEAR,
+                                //         temp->timeMONTH,
+                                //         temp->timeDAY,
+                                //         temp->timeHOUR,
+                                //         temp->timeMIN,
+                                //         temp->timeSEC);
                                 send(childSocket,putData,sizeof(putData),0);
                                 FILE* fp = new FILE;
                                 if (FILE *file = fopen(temp->hostName.c_str(), "r")){
                                     fclose(file);
                                     fp = fopen(temp->hostName.c_str(),"ar+");
                                     if( (delay(temp,fp)>=timeZip) ){
-                                        compress(fp);
+                                        compress(fp,temp->hostName.c_str(),temp);
                                     }
                                 }
-                                fp = fopen(temp->hostName.c_str(),"ar+");
+                                else{
+                                    fp = fopen(temp->hostName.c_str(),"ar+");
+                                }
                                 log(temp,fp);
                                 fclose(fp);
                             }
-                            else{
-                                std::cout<<"--------------------RESEND---------------------"<<std::endl;
-                            }
+                            // else{
+                            //     std::cout<<"--------------------RESEND---------------------"<<std::endl;
+                            // }
                             delete temp;
                             // delete p;
                         }
@@ -610,11 +573,11 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
     }
     stringify(&vecMEM,&(msgPacket->memPID));
 
-    std::cout<<"==============MEM================="<<std::endl;
-    for(int i=0;i<10;i++){
-        std::cout<<std::get<0>(vecMEM[i])<<"\t"<<std::get<1>(vecMEM[i])<<"\t"<<std::get<2>(vecMEM[i])<<"\t"<<std::get<3>(vecMEM[i])<<std::endl;
-    }
-    std::cout<<"==============MEM================="<<std::endl;
+    // std::cout<<"==============MEM================="<<std::endl;
+    // for(int i=0;i<10;i++){
+    //     std::cout<<std::get<0>(vecMEM[i])<<"\t"<<std::get<1>(vecMEM[i])<<"\t"<<std::get<2>(vecMEM[i])<<"\t"<<std::get<3>(vecMEM[i])<<std::endl;
+    // }
+    // std::cout<<"==============MEM================="<<std::endl;
 
     std::stringstream ssCPU;
     std::string bufCPU;
@@ -633,15 +596,15 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
     }
     stringify(&vecCPU,&(msgPacket->cpuPID));
 
-    std::cout<<"===============CPU================"<<std::endl;
-    for(int i=0;i<10;i++){
-        std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
-    }
-    std::cout<<"===============CPU================"<<std::endl;
+    // std::cout<<"===============CPU================"<<std::endl;
+    // for(int i=0;i<10;i++){
+    //     std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
+    // }
+    // std::cout<<"===============CPU================"<<std::endl;
     ssTOP>>msgPacket->hostName;
-    std::cout<<"===============HOST_NAME================"<<std::endl;
-    std::cout<<msgPacket->hostName<<std::endl;
-    std::cout<<"===============HOST_NAME================"<<std::endl;
+    // std::cout<<"===============HOST_NAME================"<<std::endl;
+    // std::cout<<msgPacket->hostName<<std::endl;
+    // std::cout<<"===============HOST_NAME================"<<std::endl;
 }
 
 void log(Stats* stats,FILE* fp){
@@ -711,7 +674,6 @@ int delay(Stats* stats, FILE* fp){
         time_t now;
         time(&now);
         struct tm *now1 = localtime(&now);
-        std::cout<<"SOMETHING NOW:: "<<std::string(str1)<<" "<<std::string(str2)<<" "<<now1->tm_year<<" "<<now1->tm_mon<<" "<<now1->tm_mday<<" "<<sep<<" "<<now1->tm_hour<<" "<<now1->tm_min<<" "<<now1->tm_sec<<std::endl;
 
         oldTime->tm_hour = hour;
         oldTime->tm_min  = minute;
@@ -719,11 +681,8 @@ int delay(Stats* stats, FILE* fp){
         oldTime->tm_year = year-1900;
         oldTime->tm_mon  = month-1;
         oldTime->tm_mday = day;
-        std::cout<<"HELLO::: "<<mktime(now1)<<"::::"<<mktime(oldTime)<<":::: "<<std::endl;
 
-        std::cout<<"SOMETHING OLD:: "<<std::string(str1)<<" "<<std::string(str2)<<" "<<oldTime->tm_year<<" "<<oldTime->tm_mon<<" "<<oldTime->tm_mday<<" "<<sep<<" "<<oldTime->tm_hour<<" "<<oldTime->tm_min<<" "<<oldTime->tm_sec<<std::endl;
         double seconds = mktime(now1)-mktime(oldTime);
-        printf ("%.f seconds since new year in the current timezone.\n", seconds);
         delete oldTime;
         return seconds;
     }
@@ -732,12 +691,20 @@ int delay(Stats* stats, FILE* fp){
     }
 }
 
-void compress(FILE* fp){
-    std::cout<<"Hello world"<<std::endl;
+void compress(FILE *fp, const char *name,Stats* stats){
+    std::string tmp = std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    char* where = new char[size];
+    rewind(fp);
+    fread(where, sizeof(char), size, fp);
+    std::string final = std::string(where);
+
     gzFile *fi = new gzFile;
-    *fi = gzopen("test.gz", "wb");
-    gzwrite(*fi,"my decompressed data",strlen("my decompressed data"));
+    *fi = gzopen(tmp.c_str(), "wb");
+    gzwrite(*fi,where,size);
     gzclose(*fi);
-    std::cout<<"End world"<<std::endl;
+    remove(name);
     delete fi;
+    delete[] where;
 }

@@ -396,23 +396,23 @@ int main(int argc , char *argv[]){
         server.sin_addr.s_addr = inet_addr(destinationAddress);
         server.sin_family = AF_INET;
         server.sin_port = htons( destinationPort );
-        printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tLoad%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
-                                        stats.asb,
-                                        stats.fsb,
-                                        stats.asp,
-                                        stats.fsp,
-                                        stats.upt,
-                                        stats.mtb,
-                                        stats.mab,
-                                        stats.stb,
-                                        stats.sab,
-                                        (float)stats.loadavg/100.0,
-                                        stats.timeYEAR,
-                                        stats.timeMONTH,
-                                        stats.timeDAY,
-                                        stats.timeHOUR,
-                                        stats.timeMIN,
-                                        stats.timeSEC);
+        // printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tLoad%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+        //                                 stats.asb,
+        //                                 stats.fsb,
+        //                                 stats.asp,
+        //                                 stats.fsp,
+        //                                 stats.upt,
+        //                                 stats.mtb,
+        //                                 stats.mab,
+        //                                 stats.stb,
+        //                                 stats.sab,
+        //                                 (float)stats.loadavg/100.0,
+        //                                 stats.timeYEAR,
+        //                                 stats.timeMONTH,
+        //                                 stats.timeDAY,
+        //                                 stats.timeHOUR,
+        //                                 stats.timeMIN,
+        //                                 stats.timeSEC);
 
         if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
             printf("CONNECT ERROR\n");
@@ -523,10 +523,10 @@ void buildStats(Stats* stats){
     std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
     parseStat(&pinfo,&procCPU,stats->upt);
     stringify(&procCPU,&(stats->cpuPID));
-    std::cout<<"PID\tMEM(B)\tUSER\tCOMM"<<std::endl;
-    std::cout<<stats->memPID<<std::endl;
-    std::cout<<"PID\tCPU(%%)\tUSER\tCOMM"<<std::endl;
-    std::cout<<stats->cpuPID<<std::endl;
+    // std::cout<<"PID\tMEM(B)\tUSER\tCOMM"<<std::endl;
+    // std::cout<<stats->memPID<<std::endl;
+    // std::cout<<"PID\tCPU(%%)\tUSER\tCOMM"<<std::endl;
+    // std::cout<<stats->cpuPID<<std::endl;
 }
 
 template <class T>
