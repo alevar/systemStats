@@ -452,11 +452,12 @@ int main(int argc , char *argv[]){
 
         char data1[totalSize];
         serialize(&statsMain, data1,(long)totalSize);
-        char *p = data1;
+        char *x = data1;
         int* numbytes = new int;
 
-        while((*numbytes=send(socket_desc,p,sizeof(p),MSG_CONFIRM))>0){
-            p+=*numbytes;
+        while((*numbytes=send(socket_desc,static_cast<void *>(x),sizeof(x),MSG_CONFIRM))>0){
+            // std::cout<<"ADDRESS:: "<<static_cast<void *>(x)<<std::endl;
+            x+=*numbytes;
         }
 
         // waitRecv= true;

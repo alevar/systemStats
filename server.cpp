@@ -26,6 +26,7 @@
 #include <zlib.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <cstring>
 
 #define BACKLOG 1           // Number of connections to queue
 #define ZIP_DELAY 86400
@@ -307,9 +308,9 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize);
 void log(Stats*,FILE*);
 void getTime(CurTime*);
 int delay(Stats*,FILE*);
-void compress(FILE*,const char*,Stats*);
+void compress(FILE*,const char*,Stats*,char*);
 void printStats(Stats*);
-int child(int,int);
+int child(int,int,char*,int);
 
 int main(int argc , char *argv[])
 {
@@ -319,12 +320,17 @@ int main(int argc , char *argv[])
     int option_index;
     int parentSocket, childSocket, addrlen;
     struct sockaddr_in server, client;
+    char *outputDir;
+    bool printST = false;
+    static int verbose_flag;
 
     while (1) {
         option_index = 0;
         static struct option long_options[] = {
             {"port",     required_argument, 0,  0 },
             {"zip",     required_argument, 0,  0 },
+            {"out",     required_argument, 0,  0 },
+            {"verbose", no_argument,       &verbose_flag, 1},
             {0,         0,                 0,  0 }
         };
 
@@ -338,13 +344,23 @@ int main(int argc , char *argv[])
                 if (optarg){
                     if (strcmp(long_options[option_index].name, "port")==0){
                         serverPort = atoi(optarg);
-                        printf("PORT SET TO: %s\n", optarg );
                     }
                     if (strcmp(long_options[option_index].name, "zip")==0){
                         timeZip = atoi(optarg);
                     }
                     if (strcmp(long_options[option_index].name, "zip")!=0){
                         timeZip = ZIP_DELAY;
+                    }
+                    if (strcmp(long_options[option_index].name, "out")==0){
+                        if(strcmp(&optarg[std::strlen(optarg)-1],"/")==0){
+                            outputDir = optarg;
+                        }
+                        else{
+                            std::string *tempSTR = new std::string(optarg);
+                            tempSTR->append("/");
+                            outputDir = strdup(tempSTR->c_str());
+                            delete tempSTR;
+                        }
                     }
                 }
                 break;
@@ -363,9 +379,6 @@ int main(int argc , char *argv[])
             printf("%s ", argv[optind++]);
         printf("\n");
     }
-
-    // Check the time difference between the first time in the file and the current
-    // if more than a day - compress
 
     if((parentSocket = socket(AF_INET , SOCK_STREAM , 0)) < 0)
     {
@@ -387,10 +400,8 @@ int main(int argc , char *argv[])
         close(parentSocket);
         exit(-1);
     }
-    puts("binding successful");
      
     listen(parentSocket, BACKLOG);
-    puts("Waiting for incoming connections...");
     addrlen = sizeof(struct sockaddr_in);
 
     int status;
@@ -413,10 +424,8 @@ int main(int argc , char *argv[])
                     }
                 case 0: // Child
                     {
-                        // printf("CONNECTED\n");
                         close(parentSocket);
-                        child(childSocket,timeZip);
-                        std::cout<<"DONE WITH CHILD"<<std::endl;
+                        child(childSocket,timeZip,outputDir,verbose_flag);
                         break;
                     }
                 default:    // Parent
@@ -497,13 +506,6 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         vecMEM.push_back(std::make_tuple(t1,t2,t3,t4));
     }
     stringify(&vecMEM,&(msgPacket->memPID));
-
-    // std::cout<<"==============MEM================="<<std::endl;
-    // for(int i=0;i<10;i++){
-    //     std::cout<<std::get<0>(vecMEM[i])<<"\t"<<std::get<1>(vecMEM[i])<<"\t"<<std::get<2>(vecMEM[i])<<"\t"<<std::get<3>(vecMEM[i])<<std::endl;
-    // }
-    // std::cout<<"==============MEM================="<<std::endl;
-
     std::stringstream ssCPU;
     std::string bufCPU;
     std::vector<std::tuple <long,int,std::string,std::string>> vecCPU;
@@ -520,16 +522,7 @@ void deserialize(char *data, Stats* msgPacket,long* stringSize)
         vecCPU.push_back(std::make_tuple(y1,y2,y3,y4));
     }
     stringify(&vecCPU,&(msgPacket->cpuPID));
-
-    // std::cout<<"===============CPU================"<<std::endl;
-    // for(int i=0;i<10;i++){
-    //     std::cout<<std::get<0>(vecCPU[i])<<"\t"<<std::get<1>(vecCPU[i])<<"\t"<<std::get<2>(vecCPU[i])<<"\t"<<std::get<3>(vecCPU[i])<<std::endl;
-    // }
-    // std::cout<<"===============CPU================"<<std::endl;
     ssTOP>>msgPacket->hostName;
-    // std::cout<<"===============HOST_NAME================"<<std::endl;
-    // std::cout<<msgPacket->hostName<<std::endl;
-    // std::cout<<"===============HOST_NAME================"<<std::endl;
 }
 
 void log(Stats* stats,FILE* fp){
@@ -616,8 +609,8 @@ int delay(Stats* stats, FILE* fp){
     }
 }
 
-void compress(FILE *fp, const char *name,Stats* stats){
-    std::string tmp = std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
+void compress(FILE *fp, const char *name,Stats* stats,char* outputDir){
+    std::string tmp = std::string(outputDir)+std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
     fseek(fp, 0, SEEK_END);
     size_t size = ftell(fp);
     char* where = new char[size];
@@ -634,7 +627,7 @@ void compress(FILE *fp, const char *name,Stats* stats){
     delete[] where;
 }
 
-int child(int childSocket,int timeZip){
+int child(int childSocket,int timeZip,char* outputDir,int verbose_flag){
     Stats* temp = new Stats;
     int* numbytes = new int;
     long* totalSize = new long;
@@ -678,7 +671,36 @@ int child(int childSocket,int timeZip){
         if(dataRECV){
             dataRECV = false;
             deserialize(data, temp, sizePID);
-            printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
+            if(verbose_flag){
+                printStats(temp);
+            }
+            send(childSocket,putData,sizeof(*putData),0);
+            FILE* fp = new FILE;
+            if (FILE *file = fopen(temp->hostName.c_str(), "r")){
+                fclose(file);
+                fp = fopen((std::string(outputDir)+temp->hostName).c_str(),"ar+");
+                if( (delay(temp,fp)>=timeZip) ){
+                    compress(fp,(std::string(outputDir)+temp->hostName).c_str(),temp,outputDir);
+                }
+            }
+            else{
+                fp = fopen((std::string(outputDir)+temp->hostName).c_str(),"ar+");
+            }
+            log(temp,fp);
+            fclose(fp);
+        }
+        delete temp;
+    }
+    delete numbytes;
+    delete totalSize;
+    delete sizePID;
+    delete putData;
+    close(childSocket);
+    return 1;
+}
+
+void printStats(Stats *temp){
+    printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\nPID\tMEM(B)\tUSER\tCOMMAND\n%sPID\tCPU(%%)\tUSER\tCOMMAND\n%sHOSTNAME>%s\n",
                     temp->asb,
                     temp->fsb,
                     temp->asp,
@@ -694,32 +716,8 @@ int child(int childSocket,int timeZip){
                     temp->timeDAY,
                     temp->timeHOUR,
                     temp->timeMIN,
-                    temp->timeSEC);
-            send(childSocket,putData,sizeof(*putData),0);
-            FILE* fp = new FILE;
-            if (FILE *file = fopen(temp->hostName.c_str(), "r")){
-                fclose(file);
-                fp = fopen(temp->hostName.c_str(),"ar+");
-                if( (delay(temp,fp)>=timeZip) ){
-                    compress(fp,temp->hostName.c_str(),temp);
-                }
-            }
-            else{
-                fp = fopen(temp->hostName.c_str(),"ar+");
-            }
-            log(temp,fp);
-            fclose(fp);
-        }
-        // else{
-        //     std::cout<<"--------------------RESEND---------------------"<<std::endl;
-        // }
-        delete temp;
-        // delete p;
-    }
-    delete numbytes;
-    delete totalSize;
-    delete sizePID;
-    delete putData;
-    close(childSocket);
-    return 1;
+                    temp->timeSEC,
+                    temp->memPID.c_str(),
+                    temp->cpuPID.c_str(),
+                    temp->hostName.c_str());
 }
