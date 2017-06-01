@@ -25,9 +25,12 @@
 #include <bitset>
 #include <sstream>
 #include <unistd.h>
+#include <zlib.h>
+#include <signal.h>
+#include <cstring>
 
 #define HOST_NAME_LEN 50    // Len of the char array to store the hostname
-#define PRINT_STATS false
+#define ZIP_DELAY 86400
 
 int pageSize = getpagesize();
 
@@ -316,12 +319,14 @@ void serialize(Stats*, char*, long);
 void getTime(Stats*);
 void log(Stats*,FILE*);
 void printStats(Stats*);
+void compress(FILE*,Stats*,char*);
+int delay(Stats*,FILE*);
 
 int main(int argc , char *argv[]){
     int c;
     int destinationPort;
     int updateSec;
-    char * destinationAddress;
+    char *destinationAddress;
     int option_index;
     struct hostent *he;
     struct sockaddr_in server;
@@ -330,17 +335,22 @@ int main(int argc , char *argv[]){
     bool waitRecv;
     int totalSize;
     long stringSize;
-    bool printArg = PRINT_STATS;
     Stats statsMain;
+    static int verbose_flag;
+    bool log_flag = false;
+    char *outputDir;
+    int timeZip;
 
     while (1) {
         option_index = 0;
         static struct option long_options[] = {
-            {"port",     required_argument, 0,  0 },
-            {"addr",     required_argument, 0,  0 },
-            {"sec",     required_argument, 0,  0 },
-            {"print",   required_argument, 0,   0},
-            {0,         0,                 0,  0 }
+            {"port",    required_argument, 0,  0},
+            {"addr",    required_argument, 0,  0},
+            {"sec",     required_argument, 0,  0},
+            {"log",     required_argument, 0,  0},
+            {"zip",     required_argument, 0,  0 },
+            {"verbose", no_argument,       &verbose_flag, 1},
+            {0,         0,                 0,  0}
         };
 
         c = getopt_long(argc, argv, "t:d:0", long_options, &option_index);
@@ -353,7 +363,6 @@ int main(int argc , char *argv[]){
                 if (optarg){
                     if (strcmp(long_options[option_index].name, "port")==0){
                         destinationPort = atoi(optarg);
-                        printf("PORT SET TO: %s\n", optarg );
                     }
                     if (strcmp(long_options[option_index].name, "addr")==0){
                         if ((he = gethostbyname(optarg)) != NULL){
@@ -365,14 +374,30 @@ int main(int argc , char *argv[]){
                         else{
                             exit(1);
                         }
-                        printf("ADDR SET TO: %s\n", destinationAddress);
                     }
                     if (strcmp(long_options[option_index].name, "sec")==0){
                         updateSec = atoi(optarg);
-                        printf("UPDATE TIME SET TO: %s\n", optarg);
                     }
-                    if (strcmp(long_options[option_index].name, "print")==0){
-                        printArg = true;
+                    if (strcmp(long_options[option_index].name, "log")==0){
+                        log_flag = true;
+                        if(strcmp(&optarg[std::strlen(optarg)-1],"/")==0){
+                            std::string *tempSTR = new std::string(optarg);
+                            tempSTR->append("localLog");
+                            outputDir = strdup(tempSTR->c_str());
+                            delete tempSTR;
+                        }
+                        else{
+                            std::string *tempSTR = new std::string(optarg);
+                            tempSTR->append("/localLog");
+                            outputDir = strdup(tempSTR->c_str());
+                            delete tempSTR;
+                        }
+                    }
+                    if (strcmp(long_options[option_index].name, "zip")==0){
+                        timeZip = atoi(optarg);
+                    }
+                    if (strcmp(long_options[option_index].name, "zip")!=0){
+                        timeZip = ZIP_DELAY;
                     }
                 }
                 break;
@@ -392,10 +417,6 @@ int main(int argc , char *argv[]){
         printf("\n");
     }
 
-    if(printArg){
-        std::cout<<"HELLO WORLD"<<std::endl;
-    }
-
     while(true){
         buildStats(&statsMain);
 
@@ -406,23 +427,6 @@ int main(int argc , char *argv[]){
         server.sin_addr.s_addr = inet_addr(destinationAddress);
         server.sin_family = AF_INET;
         server.sin_port = htons( destinationPort );
-        // printf("MessageOut:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tLoad%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\n",
-        //                                 stats.asb,
-        //                                 stats.fsb,
-        //                                 stats.asp,
-        //                                 stats.fsp,
-        //                                 stats.upt,
-        //                                 stats.mtb,
-        //                                 stats.mab,
-        //                                 stats.stb,
-        //                                 stats.sab,
-        //                                 (float)stats.loadavg/100.0,
-        //                                 stats.timeYEAR,
-        //                                 stats.timeMONTH,
-        //                                 stats.timeDAY,
-        //                                 stats.timeHOUR,
-        //                                 stats.timeMIN,
-        //                                 stats.timeSEC);
 
         if (connect(socket_desc , (struct sockaddr *)&server , sizeof(server)) < 0){
             printf("CONNECT ERROR\n");
@@ -456,23 +460,27 @@ int main(int argc , char *argv[]){
         int* numbytes = new int;
 
         while((*numbytes=send(socket_desc,static_cast<void *>(x),sizeof(x),MSG_CONFIRM))>0){
-            // std::cout<<"ADDRESS:: "<<static_cast<void *>(x)<<std::endl;
             x+=*numbytes;
         }
+        if(verbose_flag){
+            printStats(&statsMain);
+        }
+        if(log_flag){
+            FILE* fp = new FILE;
+            if (FILE *file = fopen(outputDir, "r")){
+                fclose(file);
+                fp = fopen(outputDir,"ar+");
+                if( (delay(&statsMain,fp)>=timeZip) ){
+                    compress(fp,&statsMain,outputDir);
+                }
+            }
+            else{
+                fp = fopen(outputDir,"ar+");
+            }
+            log(&statsMain,fp);
+            fclose(fp);
+        }
 
-        // waitRecv= true;
-        // while(waitRecv){
-        //     if((*numbytes = recv(socket_desc, &closeCall, sizeof(closeCall), 0)) == -1){
-        //         perror("recv()");
-        //         break;
-        //     }
-        //     else{
-        //         waitRecv = false;
-        //         if(closeCall==1){
-        //             close(socket_desc);
-        //         }
-        //     }
-        // }
         delete numbytes;
         close(socket_desc);
         sleep(updateSec);
@@ -535,10 +543,6 @@ void buildStats(Stats* stats){
     std::vector<std::tuple <long,float,std::string,std::string>> procCPU;
     parseStat(&pinfo,&procCPU,stats->upt);
     stringify(&procCPU,&(stats->cpuPID));
-    // std::cout<<"PID\tMEM(B)\tUSER\tCOMM"<<std::endl;
-    // std::cout<<stats->memPID<<std::endl;
-    // std::cout<<"PID\tCPU(%%)\tUSER\tCOMM"<<std::endl;
-    // std::cout<<stats->cpuPID<<std::endl;
 }
 
 template <class T>
@@ -730,7 +734,6 @@ void getHostName(Stats* stats){
 
 void getDiskSpace(const char *path,Stats* stats){
     struct statvfs buf;
-    // struct stat fi;
 
     statvfs("/",&buf);
     stats->asb = buf.f_bavail*buf.f_bsize;
@@ -831,4 +834,83 @@ void log(Stats* stats,FILE* fp){
     fputs(stats->memPID.c_str(),fp);
     fputs("PID\tCPU(%%)\tUSER\tCOMMAND\n",fp);
     fputs(stats->cpuPID.c_str(),fp);
+}
+
+
+void compress(FILE *fp,Stats* stats,char* outputDir){
+    std::string tmp = std::string(outputDir)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
+    fseek(fp, 0, SEEK_END);
+    size_t size = ftell(fp);
+    char* where = new char[size];
+    rewind(fp);
+    fread(where, sizeof(char), size, fp);
+    std::string final = std::string(where);
+
+    gzFile *fi = new gzFile;
+    *fi = gzopen(tmp.c_str(), "wb");
+    gzwrite(*fi,where,size);
+    gzclose(*fi);
+    delete fi;
+    delete[] where;
+}
+
+void printStats(Stats *temp){
+    printf("MessageIn:\n\tasb>%lu\n\tfsb>%lu\n\tasp>%lu\n\tfsp>%lu\n\tupt>%li\n\tmtb>%lu\n\tmab>%lu\n\tstb>%lu\n\tsab>%lu\n\tload>%.2f\n\tYEAR>%li\n\tMONTH>%li\n\tDAY>%li\n\tHOUR>%li\n\tMIN>%li\n\tSEC>%li\nPID\tMEM(B)\tUSER\tCOMMAND\n%sPID\tCPU(%%)\tUSER\tCOMMAND\n%sHOSTNAME>%s\n",
+                    temp->asb,
+                    temp->fsb,
+                    temp->asp,
+                    temp->fsp,
+                    temp->upt,
+                    temp->mtb,
+                    temp->mab,
+                    temp->stb,
+                    temp->sab,
+                    (float)(temp->loadavg/100.0),
+                    temp->timeYEAR,
+                    temp->timeMONTH,
+                    temp->timeDAY,
+                    temp->timeHOUR,
+                    temp->timeMIN,
+                    temp->timeSEC,
+                    temp->memPID.c_str(),
+                    temp->cpuPID.c_str(),
+                    temp->hostName.c_str());
+}
+
+int delay(Stats* stats, FILE* fp){
+    int year, month, day, hour, minute, sec;
+    char c;
+    char str1[100], str2[100];
+    char sep;
+    int j = fscanf(fp,"%s %s %d %d %d %c %d %d %d %c",
+                    str1,
+                    str2,
+                    &year,
+                    &month,
+                    &day,
+                    &sep,
+                    &hour,
+                    &minute,
+                    &sec,
+                    &c);
+    if (j != 10 || c != '\n'){
+        struct tm oldTime;
+        time_t now;
+        time(&now);
+        struct tm *now1 = localtime(&now);
+
+        oldTime.tm_hour = hour;
+        oldTime.tm_min  = minute;
+        oldTime.tm_sec  = sec;
+        oldTime.tm_year = year-1900;
+        oldTime.tm_mon  = month-1;
+        oldTime.tm_mday = day;
+
+        double seconds = mktime(now1)-mktime(&oldTime);
+        // delete oldTime;
+        return seconds;
+    }
+    else{
+        return 0;
+    }
 }

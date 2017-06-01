@@ -321,7 +321,6 @@ int main(int argc , char *argv[])
     int parentSocket, childSocket, addrlen;
     struct sockaddr_in server, client;
     char *outputDir;
-    bool printST = false;
     static int verbose_flag;
 
     while (1) {
@@ -609,7 +608,7 @@ int delay(Stats* stats, FILE* fp){
     }
 }
 
-void compress(FILE *fp, const char *name,Stats* stats,char* outputDir){
+void compress(FILE *fp,const char *name,Stats* stats,char* outputDir){
     std::string tmp = std::string(outputDir)+std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
     fseek(fp, 0, SEEK_END);
     size_t size = ftell(fp);
