@@ -600,7 +600,6 @@ int delay(Stats* stats, FILE* fp){
         oldTime.tm_mday = day;
 
         double seconds = mktime(now1)-mktime(&oldTime);
-        // delete oldTime;
         return seconds;
     }
     else{
