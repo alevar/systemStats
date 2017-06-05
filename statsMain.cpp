@@ -837,7 +837,6 @@ void log(Stats* stats,FILE* fp){
 
 void compress(FILE *fp,Stats* stats,char* outputDir){
     std::string tmp = std::string(outputDir)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
-    std::cout<<"COMPRESSING INTO:: "<<tmp<<std::endl;
     fseek(fp, 0, SEEK_END);
     size_t size = ftell(fp);
     char* where = new char[size];
@@ -849,6 +848,7 @@ void compress(FILE *fp,Stats* stats,char* outputDir){
     *fi = gzopen(tmp.c_str(), "wb");
     gzwrite(*fi,where,size);
     gzclose(*fi);
+    remove(outputDir);
     delete fi;
     delete[] where;
 }
@@ -906,49 +906,9 @@ int delay(Stats* stats, FILE* fp){
         oldTime.tm_mday = day;
 
         double seconds = (double)(mktime(now1)-mktime(&oldTime));
-        std::cout<<"seconds: "<<seconds<<std::endl;
         return seconds;
     }
     else{
         return 0;
     }
 }
-
-// int delay(Stats* stats, FILE* fp){
-//     int year, month, day, hour, minute, sec;
-//     char c;
-//     char str1[100], str2[100];
-//     char sep;
-//     int j = fscanf(fp,"%s %s %d %d %d %c %d %d %d %c",
-//                     str1,
-//                     str2,
-//                     &year,
-//                     &month,
-//                     &day,
-//                     &sep,
-//                     &hour,
-//                     &minute,
-//                     &sec,
-//                     &c);
-//     printf("TIME>> HOUR: %d MIN: %d SEC: %d\n",hour,minute,sec);
-//     if (j != 10 || c != '\n'){
-//         struct tm oldTime;
-//         time_t now;
-//         time(&now);
-//         struct tm *now1 = localtime(&now);
-
-//         oldTime.tm_hour = hour;
-//         oldTime.tm_min  = minute;
-//         oldTime.tm_sec  = sec;
-//         oldTime.tm_year = year-1900;
-//         oldTime.tm_mon  = month-1;
-//         oldTime.tm_mday = day;
-
-//         double seconds = mktime(now1)-mktime(&oldTime);
-//         std::cout<<"seconds: "<<seconds<<std::endl;
-//         return seconds;
-//     }
-//     else{
-//         return 0;
-//     }
-// }

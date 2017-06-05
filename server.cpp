@@ -314,7 +314,7 @@ int child(int,int,char*,int);
 
 int main(int argc , char *argv[])
 {
-    int timeZip;
+    int timeZip = ZIP_DELAY;
     int c;
     int serverPort;
     int option_index;
@@ -346,9 +346,6 @@ int main(int argc , char *argv[])
                     }
                     if (strcmp(long_options[option_index].name, "zip")==0){
                         timeZip = atoi(optarg);
-                    }
-                    if (strcmp(long_options[option_index].name, "zip")!=0){
-                        timeZip = ZIP_DELAY;
                     }
                     if (strcmp(long_options[option_index].name, "out")==0){
                         if(strcmp(&optarg[std::strlen(optarg)-1],"/")==0){
@@ -608,7 +605,7 @@ int delay(Stats* stats, FILE* fp){
 }
 
 void compress(FILE *fp,const char *name,Stats* stats,char* outputDir){
-    std::string tmp = std::string(outputDir)+std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
+    std::string tmp = std::string(name)+std::to_string(stats->timeYEAR)+std::to_string(stats->timeMONTH)+std::to_string(stats->timeDAY)+std::to_string(stats->timeHOUR)+std::to_string(stats->timeMIN)+std::to_string(stats->timeSEC)+std::string(".gz");
     fseek(fp, 0, SEEK_END);
     size_t size = ftell(fp);
     char* where = new char[size];
@@ -674,7 +671,7 @@ int child(int childSocket,int timeZip,char* outputDir,int verbose_flag){
             }
             send(childSocket,putData,sizeof(*putData),0);
             FILE* fp = new FILE;
-            if (FILE *file = fopen(temp->hostName.c_str(), "r")){
+            if (FILE *file = fopen((std::string(outputDir)+temp->hostName).c_str(), "r")){
                 fclose(file);
                 fp = fopen((std::string(outputDir)+temp->hostName).c_str(),"ar+");
                 if( (delay(temp,fp)>=timeZip) ){
